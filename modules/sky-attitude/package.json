@@ -1,0 +1,7 @@
+{
+  "name": "sky-attitude",
+  "version": "0.1.0",
+  "description": "CMDeviceMotion のクォータニオンをそのまま取り出すローカルモジュール",
+  "main": "index.ts",
+  "private": true
+}

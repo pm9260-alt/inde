@@ -37,11 +37,13 @@ export interface UseOrientationResult {
 }
 
 /**
- * @param headingOffsetDeg 磁北→真北の補正と手動補正の合計（度・東が正）
+ * @param declinationDeg   磁北から真北へのずれ（度・東が正）。不明なら 0。
+ * @param manualOffsetDeg  利用者が手で加える補正（度・東が正）
  * @param enabled          画面が前面にあるあいだだけ true にする
  */
 export const useOrientation = (
-  headingOffsetDeg: number,
+  declinationDeg: number,
+  manualOffsetDeg: number,
   enabled = true,
 ): UseOrientationResult => {
   const attitudeRef = useRef<Quat>(QUAT_IDENTITY);
@@ -57,8 +59,8 @@ export const useOrientation = (
   );
 
   useEffect(() => {
-    provider.setHeadingOffset(headingOffsetDeg);
-  }, [provider, headingOffsetDeg]);
+    provider.setHeadingCorrection(declinationDeg, manualOffsetDeg);
+  }, [provider, declinationDeg, manualOffsetDeg]);
 
   useEffect(() => {
     if (!enabled) {

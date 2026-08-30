@@ -1,0 +1,67 @@
+{
+  "expo": {
+    "name": "星めぐり",
+    "slug": "hoshimeguri",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "hoshimeguri",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#05070B"
+    },
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.example.hoshimeguri",
+      "requireFullScreen": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "いま見えている夜空に星と星座を重ねて表示するために、カメラの映像を使います。映像が端末の外へ送られることはありません。",
+        "NSLocationWhenInUseUsageDescription": "いる場所から見える星の位置を計算するために、現在地を使います。おおまかな位置がわかれば十分です。",
+        "NSMotionUsageDescription": "端末がどちらを向いているかを知り、その方向の星を表示するために、モーションセンサーを使います。",
+        "UIRequiredDeviceCapabilities": ["magnetometer", "gyroscope"],
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "package": "com.example.hoshimeguri",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0A0D13"
+      },
+      "permissions": ["CAMERA", "ACCESS_COARSE_LOCATION"]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "いま見えている夜空に星と星座を重ねて表示するために、カメラの映像を使います。"
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "いる場所から見える星の位置を計算するために、現在地を使います。"
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "backgroundColor": "#05070B",
+          "imageWidth": 160
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}

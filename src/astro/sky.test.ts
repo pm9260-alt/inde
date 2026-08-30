@@ -14,7 +14,6 @@ import {
   azimuthOf,
   angleBetween,
   applyHeadingOffset,
-  DEG,
   enuFromAltAz,
   normalize,
   quatFromMat3,

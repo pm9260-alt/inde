@@ -13,7 +13,8 @@
  * 色は彩度を大きく落とす。実際の夜空で色がわかるのはベテルギウスや
  * アンタレスのような一部だけで、全部が色づいていると嘘になる。
  */
-import { starStyle } from '../../design/tokens';
+import { rgbFromHex } from '../../design/color';
+import { color, starStyle } from '../../design/tokens';
 import { STAR_CATALOG } from '../../data/stars.generated';
 import { ALL_MEMBER_HRS } from '../../data/constellations';
 import { createProgram, type GL } from './program';
@@ -70,6 +71,9 @@ export const sizeForMagnitude = (magnitude: number): number => {
   const size = starStyle.referenceSizePx * starStyle.sizeFalloffPerMagnitude ** steps;
   return Math.min(starStyle.maxSizePx, Math.max(starStyle.minSizePx, size));
 };
+
+/** 物語が語っている星の色。空の色から浮き上がるよう橙に寄せる。 */
+const HIGHLIGHT_TINT = rgbFromHex(color.ember.core) as [number, number, number];
 
 /** 星の色を、彩度を落としてから返す。 */
 const desaturate = (color: readonly [number, number, number]): [number, number, number] => {
@@ -128,11 +132,13 @@ export class StarLayer {
    * @param directions 星表と同じ並びの ENU 単位ベクトル
    * @param altitudes  星表と同じ並びの高度（度）
    * @param brightness 星ごとの見え方（0〜1）。0 の星は送らない。
+   * @param highlight  いま物語が語っている星の HR 番号。大きく、橙に寄せて描く。
    */
   setStars(
     directions: Float32Array,
     altitudes: Float32Array,
     brightness: Float32Array,
+    highlight?: ReadonlySet<number>,
   ): void {
     const data = this.vertexData;
     let offset = 0;
@@ -140,10 +146,11 @@ export class StarLayer {
       // 地平線の下にある星は描かない。地面を透かして星が見えることはない。
       if (altitudes[i] < -1) continue;
       const value = brightness[i];
-      if (value <= 0.02) continue;
+      if (value <= 0.02 && !(highlight?.has(STAR_CATALOG[i].hr) ?? false)) continue;
 
       const star = STAR_CATALOG[i];
-      const tint = desaturate(star.color);
+      const isHighlighted = highlight?.has(star.hr) ?? false;
+      const tint = isHighlighted ? HIGHLIGHT_TINT : desaturate(star.color);
       const isMember = ALL_MEMBER_HRS.has(star.hr);
 
       data[offset] = directions[i * 3];
@@ -152,8 +159,14 @@ export class StarLayer {
       data[offset + 3] = tint[0];
       data[offset + 4] = tint[1];
       data[offset + 5] = tint[2];
-      data[offset + 6] = sizeForMagnitude(star.mag) * (isMember ? starStyle.memberBoost : 1);
-      data[offset + 7] = value;
+      const scale = isHighlighted
+        ? starStyle.highlightBoost
+        : isMember
+          ? starStyle.memberBoost
+          : 1;
+      data[offset + 6] = sizeForMagnitude(star.mag) * scale;
+      // 物語が触れている星は、暗くても必ず見えるようにする。
+      data[offset + 7] = isHighlighted ? Math.max(value, 0.85) : value;
       offset += StarLayer.STRIDE;
     }
     this.vertexCount = offset / StarLayer.STRIDE;

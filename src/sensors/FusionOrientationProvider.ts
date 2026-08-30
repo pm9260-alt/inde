@@ -48,8 +48,9 @@ export class FusionOrientationProvider implements OrientationProvider {
     return motion && magnetometer;
   }
 
-  setHeadingOffset(degrees: number): void {
-    this.headingOffset = degrees;
+  /** 自前の TRIAD は磁北基準なので、偏角も手動補正も両方足す。 */
+  setHeadingCorrection(declinationDeg: number, manualDeg: number): void {
+    this.headingOffset = declinationDeg + manualDeg;
   }
 
   async start(listener: OrientationListener): Promise<() => void> {

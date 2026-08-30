@@ -1,36 +1,27 @@
-
-# Expo
-# Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
-# Metro
-# Native
-# debug
-# dependencies
-# generated native folders
-# local env files
-# macOS
-# typescript
-*.jks
-*.key
-*.log
-*.mobileprovision
-*.orig.*
-*.p12
-*.p8
-*.pem
-*.tsbuildinfo
-.DS_Store
-.env*.local
+# Expo / React Native
 .expo/
-.kotlin/
-.metro-health-check*
-/android
-/ios
-android/
 dist/
-expo-env.d.ts
-ios/
-node_modules/
-npm-debug.*
 web-build/
-yarn-debug.*
-yarn-error.*
+expo-env.d.ts
+
+# ネイティブプロジェクト（prebuild で生成されるもの）
+# 先頭の / でトップレベルだけを対象にする。modules/*/ios は追跡対象。
+/ios
+/android
+
+# 依存
+node_modules/
+
+# macOS / エディタ
+.DS_Store
+*.log
+.idea/
+.vscode/
+
+# 環境変数・資格情報
+.env
+.env.local
+*.p8
+*.p12
+*.key
+*.mobileprovision

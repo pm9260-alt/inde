@@ -50,8 +50,15 @@ export interface OrientationProvider {
    */
   start(listener: OrientationListener): Promise<() => void>;
   /**
-   * 磁北から真北への補正と、利用者による手動補正の合計（度・東が正）。
-   * 姿勢を出力する直前に適用される。
+   * 方位の補正を渡す。姿勢を出力する直前に適用される。
+   *
+   * 磁気偏角を足すべきかどうかは実装によって違う。自前の TRIAD は磁北基準
+   * なので必ず要るが、CoreMotion の .xTrueNorthZVertical はすでに真北基準
+   * なので足してはいけない。判断を呼び出し側に持たせないよう、2 つの値を
+   * 別々に渡し、どう使うかは実装に委ねる。
+   *
+   * @param declinationDeg 磁北から真北へのずれ（度・東が正）
+   * @param manualDeg      利用者が手で加える補正（度・東が正）
    */
-  setHeadingOffset(degrees: number): void;
+  setHeadingCorrection(declinationDeg: number, manualDeg: number): void;
 }
