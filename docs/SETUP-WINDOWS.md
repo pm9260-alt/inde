@@ -97,6 +97,10 @@ production プロファイルで無効にしてあります。
 
 ## 5. Expo Go の先へ進むとき
 
+> 具体的な手順は **[DEV-BUILD.md](DEV-BUILD.md)** にまとめてあります。
+> Apple Developer Program（有料・年額）への加入が必要です。
+
+
 Expo Go で動く範囲を超えるのは、次の 2 つを入れたいときです。
 
 - **ネイティブ姿勢モジュール**（`modules/sky-attitude`）

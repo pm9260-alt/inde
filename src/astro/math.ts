@@ -222,6 +222,23 @@ export const quatFromAxisAngle = (axis: Vec3, angleRad: number): Quat => {
 };
 
 /**
+ * 端末の左右軸（x 軸）まわりの回転を後から加える。
+ *
+ * 方位の補正が「世界の側」の量なのに対して、こちらは「端末の側」の量。
+ * カメラの光軸が筐体に対してわずかに傾いて実装されている、といった
+ * 個体差はこの形で現れるので、端末座標系で足すのが正しい。
+ * 姿勢推定そのものの誤差ではないため、世界座標で足してはいけない。
+ *
+ * @param degrees 正で狙いが上を向く
+ */
+export const applyPitchOffset = (q: Quat, degrees: number): Quat => {
+  if (degrees === 0) return q;
+  // 端末座標系での回転なので右から掛ける。
+  const tilt = quatFromAxisAngle(vec(1, 0, 0), degrees * DEG);
+  return quatNormalize(quatMultiply(q, tilt));
+};
+
+/**
  * 天頂軸まわりの回転を後から加える。方位のずれ（磁気偏角・手動補正）を
  * 姿勢そのものに焼き込まず、あとから足すために使う。
  *

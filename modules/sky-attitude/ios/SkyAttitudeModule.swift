@@ -1,3 +1,4 @@
+import ARKit
 import CoreMotion
 import ExpoModulesCore
 
@@ -50,11 +51,42 @@ public final class SkyAttitudeModule: Module {
   public func definition() -> ModuleDefinition {
     Name("SkyAttitude")
 
-    Events("onAttitude")
+    Events("onAttitude", "onArkitAttitude", "onArkitFailure")
 
     Function("isAvailable") { () -> Bool in
       self.motionManager.isDeviceMotionAvailable
     }
+
+    // MARK: - ARKit 経路
+    //
+    // CoreMotion の経路とは独立して動く。どちらを使うかは JavaScript が決める。
+    // ARKit はカメラ映像の特徴点追跡を併用するため、いったん向きが定まれば
+    // その後は地磁気にほとんど依存しない。磁気の乱れに強いのが利点。
+    // ただし最初の方位は結局コンパスから取るので、絶対方位の偏りは残る。
+
+    Function("isArkitSupported") { () -> Bool in
+      SkyARSource.isSupported
+    }
+
+    Function("startArkit") {
+      let source = SkyARSource.shared
+      source.onFrame = { [weak self] payload in
+        self?.sendEvent("onArkitAttitude", payload)
+      }
+      source.onFailure = { [weak self] message in
+        self?.sendEvent("onArkitFailure", ["message": message])
+      }
+      source.start()
+    }
+
+    Function("stopArkit") {
+      let source = SkyARSource.shared
+      source.onFrame = nil
+      source.onFailure = nil
+      source.stop()
+    }
+
+    View(SkyARView.self) {}
 
     /// 参照フレームが真北基準かどうか。JS 側が磁気偏角を足すべきかの判断に使う。
     Function("isTrueNorthReferenced") { () -> Bool in
@@ -71,6 +103,9 @@ public final class SkyAttitudeModule: Module {
 
     OnDestroy {
       self.motionManager.stopDeviceMotionUpdates()
+      SkyARSource.shared.onFrame = nil
+      SkyARSource.shared.onFailure = nil
+      SkyARSource.shared.stop()
     }
   }
 

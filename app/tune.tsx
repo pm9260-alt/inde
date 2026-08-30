@@ -16,7 +16,7 @@ import { makeProjection, viewingDirection } from '../src/astro/projection';
 import { SKY_ENVIRONMENTS, type SkyEnvironment } from '../src/astro/visibility';
 import { DEMO_MODE_AVAILABLE } from '../src/config/featureFlags';
 import { color, gutter, hitSlop, radius, space, stroke } from '../src/design/tokens';
-import { useObserver, useClock } from '../src/sensors/useObserver';
+import { NEUTRAL_OBSERVER, useObserver, useClock } from '../src/sensors/useObserver';
 import { useOrientation } from '../src/sensors/useOrientation';
 import { useSettings } from '../src/state/settings';
 import { useSkyModel } from '../src/sky/useSkyModel';
@@ -35,14 +35,17 @@ export default function TuneScreen() {
   const observerState = useObserver();
   const now = useClock(30_000);
 
-  const { attitudeRef, status: orientation } = useOrientation(
-    observerState.declination ?? 0,
-    settings.headingOffsetDeg,
-    true,
-  );
+  const { attitudeRef, status: orientation } = useOrientation({
+    correction: {
+      declinationDeg: observerState.declination ?? 0,
+      manualHeadingDeg: settings.headingOffsetDeg,
+      manualPitchDeg: settings.pitchOffsetDeg,
+    },
+    requested: settings.attitudeSource,
+  });
   const model = useSkyModel({
     kind: 'live',
-    observer: observerState.observer,
+    observer: observerState.observer ?? NEUTRAL_OBSERVER,
     time: now,
     environment: settings.environment,
     onlyVisibleStars: settings.onlyVisibleStars,
@@ -94,6 +97,17 @@ export default function TuneScreen() {
             max={30}
             format={(v) => `${v > 0 ? '+' : ''}${v.toFixed(1)}°`}
             onChange={(headingOffsetDeg) => update({ headingOffsetDeg })}
+          />
+          <Divider />
+          <Stepper
+            label="仰角の補正"
+            hint="星が上にずれて見えるならマイナスへ"
+            value={settings.pitchOffsetDeg}
+            step={0.25}
+            min={-5}
+            max={5}
+            format={(v) => `${v > 0 ? '+' : ''}${v.toFixed(2)}°`}
+            onChange={(pitchOffsetDeg) => update({ pitchOffsetDeg })}
           />
           <Divider />
           <Stepper
@@ -198,7 +212,11 @@ export default function TuneScreen() {
           />
           <Readout
             label="観測地"
-            value={`${observerState.observer.latitude.toFixed(3)}, ${observerState.observer.longitude.toFixed(3)}`}
+            value={
+              observerState.observer
+                ? `${observerState.observer.latitude.toFixed(3)}, ${observerState.observer.longitude.toFixed(3)}`
+                : '取得できていません'
+            }
             muted
           />
           <Readout
@@ -211,12 +229,37 @@ export default function TuneScreen() {
             muted
           />
           <Readout label="姿勢の取得元" value={orientation.source ?? '—'} muted />
+          {orientation.gravityErrorDeg != null ? (
+            <Readout
+              label="座標系の検算"
+              value={`${orientation.gravityErrorDeg.toFixed(2)}°`}
+              muted
+            />
+          ) : null}
           <Readout
             label="磁力"
             value={`${orientation.fieldMagnitude.toFixed(1)} µT`}
             muted
           />
         </Section>
+
+        {DEMO_MODE_AVAILABLE ? (
+          <Section title="開発用">
+            <Pressable
+              onPress={() => router.push('/accuracy')}
+              style={styles.linkButton}
+              accessibilityRole="button"
+            >
+              <Type variant="body" tone="ember">
+                精度を確かめる
+              </Type>
+              <Type variant="caption" tone="tertiary" style={styles.note}>
+                姿勢の取得経路を切り替えて、ゆらぎ・ドリフト・実際の星とのずれを
+                同じ条件で比べます。
+              </Type>
+            </Pressable>
+          </Section>
+        ) : null}
 
         <Pressable onPress={reset} style={styles.resetButton} accessibilityRole="button">
           <Type variant="body" tone="tertiary">
@@ -323,6 +366,10 @@ const styles = StyleSheet.create({
   },
   toggleLabels: {
     flex: 1,
+  },
+  linkButton: {
+    minHeight: 44,
+    justifyContent: 'center',
   },
   resetButton: {
     marginTop: space.x4l,

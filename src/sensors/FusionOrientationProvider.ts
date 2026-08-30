@@ -10,7 +10,8 @@
  */
 import { DeviceMotion, Magnetometer } from 'expo-sensors';
 
-import { applyHeadingOffset, vec, type Vec3 } from '../astro/math';
+import { vec, type Vec3 } from '../astro/math';
+import { applyCorrection, NO_CORRECTION, type AttitudeCorrection } from './corrections';
 import {
   angularVelocityFromDeviceMotion,
   DEFAULT_FUSION_TUNING,
@@ -39,7 +40,7 @@ export class FusionOrientationProvider implements OrientationProvider {
   private state: FusionState = INITIAL_FUSION_STATE;
   private field: Vec3 | null = null;
   private lastTimestamp: number | null = null;
-  private headingOffset = 0;
+  private correction: AttitudeCorrection = NO_CORRECTION;
   private headingFree = false;
 
   async isAvailable(): Promise<boolean> {
@@ -50,9 +51,9 @@ export class FusionOrientationProvider implements OrientationProvider {
     return motion && magnetometer;
   }
 
-  /** 自前の TRIAD は磁北基準なので、偏角も手動補正も両方足す。 */
-  setHeadingCorrection(declinationDeg: number, manualDeg: number): void {
-    this.headingOffset = declinationDeg + manualDeg;
+  /** 自前の TRIAD は磁北基準なので、偏角をそのまま足す。 */
+  setCorrection(correction: AttitudeCorrection): void {
+    this.correction = correction;
   }
 
   setHeadingFree(enabled: boolean): void {
@@ -121,7 +122,7 @@ export class FusionOrientationProvider implements OrientationProvider {
       const attitude = this.state.attitude;
       if (!attitude) return;
       listener({
-        attitude: applyHeadingOffset(attitude, this.headingOffset),
+        attitude: applyCorrection(attitude, this.correction),
         accuracy: this.accuracyOf(),
         fieldMagnitude: this.state.fieldMagnitude,
       });

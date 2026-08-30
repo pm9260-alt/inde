@@ -9,7 +9,7 @@
  *   → 触れると登場人物が出て、物語が始まる
  * 違うのは「空をどこから持ってくるか」と「演出の起点をいつ置くか」だけ。
  */
-import { CameraView, useCameraPermissions } from 'expo-camera';
+import { useCameraPermissions } from 'expo-camera';
 import { useKeepAwake } from 'expo-keep-awake';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -22,7 +22,8 @@ import { DEMO_MODE_AVAILABLE } from '../src/config/featureFlags';
 import { asterismById, type Asterism } from '../src/data/constellations';
 import { mythById, type MythScene } from '../src/data/myths';
 import { color, gutter, hitSlop, space } from '../src/design/tokens';
-import { useObserver, useClock } from '../src/sensors/useObserver';
+import { SkyCamera } from '../src/sensors/SkyCamera';
+import { NEUTRAL_OBSERVER, useObserver, useClock } from '../src/sensors/useObserver';
 import { useOrientation } from '../src/sensors/useOrientation';
 import { DEMO_ASTERISM_ID } from '../src/sky/demoSky';
 import { aimedAsterism } from '../src/sky/selection';
@@ -90,12 +91,20 @@ export default function SkyScreen() {
 
   // 偏角と手動補正は分けて渡す。姿勢の取得元によって偏角が要るかどうかが違う。
   // デモでは実際の方角と合っている必要がないので、地磁気が未較正でも動かす。
-  const { attitudeRef, status: orientation } = useOrientation(
-    observerState.declination ?? 0,
-    settings.headingOffsetDeg,
-    active,
-    demoEnabled,
+  const correction = useMemo(
+    () => ({
+      declinationDeg: observerState.declination ?? 0,
+      manualHeadingDeg: settings.headingOffsetDeg,
+      manualPitchDeg: settings.pitchOffsetDeg,
+    }),
+    [observerState.declination, settings.headingOffsetDeg, settings.pitchOffsetDeg],
   );
+  const { attitudeRef, status: orientation } = useOrientation({
+    correction,
+    enabled: active,
+    headingFree: demoEnabled,
+    requested: settings.attitudeSource,
+  });
 
   /** デモで星座を置いた方向。null なら、まだ端末が上を向いていない。 */
   const [demoAnchor, setDemoAnchor] = useState<Vec3 | null>(null);
@@ -106,7 +115,8 @@ export default function SkyScreen() {
         ? { kind: 'demo', anchor: demoAnchor ?? DEMO_PENDING_ANCHOR }
         : {
             kind: 'live',
-            observer: observerState.observer,
+            // 現在地が無いあいだは計算の型を満たすだけの値。星は描かない。
+            observer: observerState.observer ?? NEUTRAL_OBSERVER,
             time: now,
             environment: settings.environment,
             onlyVisibleStars: settings.onlyVisibleStars,
@@ -121,6 +131,14 @@ export default function SkyScreen() {
     ],
   );
   const model = useSkyModel(source);
+
+  /**
+   * 星を描いてよいか。
+   * 現在地が分からないまま「それらしい空」を出すことはしない。特定の都市を
+   * 既定値にすると、その土地の人には合って見え、ほかの土地の人には黙って
+   * 間違った空が出るため。星空を見たいだけならデモ表示がある。
+   */
+  const skyReady = demoEnabled || observerState.observer != null;
 
   const [aimed, setAimed] = useState<Asterism | null>(null);
   const [staged, setStaged] = useState<Asterism | null>(null);
@@ -174,7 +192,7 @@ export default function SkyScreen() {
 
   // 端末の向きを一定間隔で見て、照準とデモの起動を判定する。
   useEffect(() => {
-    if (!orientation.ready) return;
+    if (!orientation.ready || !skyReady) return;
     const timer = setInterval(() => {
       const attitude = attitudeRef.current;
 
@@ -208,6 +226,7 @@ export default function SkyScreen() {
     return () => clearInterval(timer);
   }, [
     orientation.ready,
+    skyReady,
     attitudeRef,
     demoEnabled,
     openedMythFor,
@@ -309,13 +328,15 @@ export default function SkyScreen() {
 
   return (
     <View style={styles.root}>
-      <CameraView style={StyleSheet.absoluteFill} facing="back" />
-      <SkyCanvas
-        model={model}
-        attitudeRef={attitudeRef}
-        handlesRef={handlesRef}
-        verticalFovDeg={settings.verticalFovDeg}
-      />
+      <SkyCamera useArCamera={orientation.usesArCamera} />
+      {skyReady ? (
+        <SkyCanvas
+          model={model}
+          attitudeRef={attitudeRef}
+          handlesRef={handlesRef}
+          verticalFovDeg={settings.verticalFovDeg}
+        />
+      ) : null}
 
       <StatusNote note={note} />
 
@@ -407,12 +428,18 @@ const useStatusNote = (
     if (!orientation.ready) {
       return { id: 'sensor', tone: 'info', text: 'センサーを読み込んでいます' };
     }
-    if (observerState.status === 'fallback') {
+    if (observerState.observer == null) {
       return {
         id: 'location',
-        tone: 'info',
-        text: '位置情報が無いため東京の空を表示しています',
-        action: { label: '許可する', onPress: () => void observerState.requestPermission() },
+        tone: 'warn',
+        text:
+          observerState.status === 'pending'
+            ? '現在地を取得しています'
+            : '現在地がわからないため、星の位置を計算できません',
+        action:
+          observerState.status === 'pending'
+            ? undefined
+            : { label: '許可する', onPress: () => void observerState.requestPermission() },
       };
     }
     return null;

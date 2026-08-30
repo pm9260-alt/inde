@@ -11,7 +11,6 @@
 import { requireOptionalNativeModule } from 'expo-modules-core';
 
 import {
-  applyHeadingOffset,
   DEG,
   quatFromAxisAngle,
   quatMultiply,
@@ -19,6 +18,7 @@ import {
   vec,
   type Quat,
 } from '../astro/math';
+import { applyCorrection, NO_CORRECTION, type AttitudeCorrection } from './corrections';
 import type {
   OrientationAccuracy,
   OrientationListener,
@@ -67,16 +67,14 @@ const REFERENCE_TO_ENU: Quat = quatFromAxisAngle(vec(0, 0, 1), 90 * DEG);
 export class NativeOrientationProvider implements OrientationProvider {
   readonly id = 'native' as const;
 
-  private declination = 0;
-  private manual = 0;
+  private correction: AttitudeCorrection = NO_CORRECTION;
 
   async isAvailable(): Promise<boolean> {
     return nativeModule?.isAvailable() ?? false;
   }
 
-  setHeadingCorrection(declinationDeg: number, manualDeg: number): void {
-    this.declination = declinationDeg;
-    this.manual = manualDeg;
+  setCorrection(correction: AttitudeCorrection): void {
+    this.correction = correction;
   }
 
   /**
@@ -98,10 +96,12 @@ export class NativeOrientationProvider implements OrientationProvider {
       });
       const deviceToEnu = quatNormalize(quatMultiply(REFERENCE_TO_ENU, deviceToReference));
       // 真北基準で取れているなら偏角を足してはいけない。
-      const offset = (event.trueNorth ? 0 : this.declination) + this.manual;
+      const correction = event.trueNorth
+        ? { ...this.correction, declinationDeg: 0 }
+        : this.correction;
 
       listener({
-        attitude: applyHeadingOffset(deviceToEnu, offset),
+        attitude: applyCorrection(deviceToEnu, correction),
         accuracy: accuracyFromNative(event.headingAccuracy),
         fieldMagnitude: event.fieldMagnitude,
       });

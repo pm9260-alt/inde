@@ -11,8 +11,16 @@
  * ---------------------------------------------------------------------------
  * 自前の姿勢推定が返すのは磁北基準の方位なので、真北へ直すには偏角が要る。
  * 偏角は expo-location の方位から得る。CoreLocation は真方位と磁方位の
- * 両方を返すので、その差がそのまま偏角になる（東京でおよそ −7.5°）。
- * 自前で地磁気モデル（WMM/IGRF）を持たずに済み、値は Apple のモデルに従う。
+ * 両方を返すので、その差がそのまま偏角になる。自前で地磁気モデル
+ * （WMM/IGRF）を持たずに済み、値は Apple のモデルに従う。場所によって
+ * 大きく変わる量なので、決め打ちにはしない。
+ *
+ * 現在地が得られないとき
+ * ---------------------------------------------------------------------------
+ * 特定の都市を既定値として置くことはしない。置けば、その土地の利用者には
+ * 一見それらしい空が出てしまい、他の土地の利用者には黙って間違った空が出る。
+ * 現在地が無いあいだは observer を null にして、呼び出し側が「星を出さない」
+ * と判断できるようにする。星空を見たいだけならデモ表示がある。
  */
 import * as Location from 'expo-location';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -20,20 +28,21 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ObserverLocation } from '../astro/sky';
 
 /**
- * 位置が取れないときに使う既定地点（東京駅）。
- * 何も表示できないより、ずれていても星空を出して「位置情報が無い」と
- * 伝えるほうが、この体験では価値がある。
+ * 現在地が無いあいだ、計算の型を満たすためだけに使う値。
+ * この観測地の空を画面に出してはいけない。呼び出し側は observer が
+ * null かどうかで判断すること。
  */
-export const FALLBACK_OBSERVER: ObserverLocation = {
-  latitude: 35.6812,
-  longitude: 139.7671,
-  elevation: 3,
+export const NEUTRAL_OBSERVER: ObserverLocation = {
+  latitude: 0,
+  longitude: 0,
+  elevation: 0,
 };
 
-export type LocationStatus = 'pending' | 'granted' | 'denied' | 'fallback';
+export type LocationStatus = 'pending' | 'granted' | 'unavailable';
 
 export interface ObserverState {
-  readonly observer: ObserverLocation;
+  /** 現在地。得られていなければ null。 */
+  readonly observer: ObserverLocation | null;
   readonly status: LocationStatus;
   /** 磁北から真北への補正（度・東が正）。得られていなければ null。 */
   readonly declination: number | null;
@@ -43,7 +52,7 @@ export interface ObserverState {
 }
 
 export const useObserver = (): ObserverState => {
-  const [observer, setObserver] = useState<ObserverLocation>(FALLBACK_OBSERVER);
+  const [observer, setObserver] = useState<ObserverLocation | null>(null);
   const [status, setStatus] = useState<LocationStatus>('pending');
   const [declination, setDeclination] = useState<number | null>(null);
   const [headingAccuracy, setHeadingAccuracy] = useState<number | null>(null);
@@ -52,7 +61,7 @@ export const useObserver = (): ObserverState => {
   const begin = useCallback(async (): Promise<void> => {
     const permission = await Location.requestForegroundPermissionsAsync();
     if (permission.status !== 'granted') {
-      setStatus('fallback');
+      setStatus('unavailable');
       return;
     }
     setStatus('granted');

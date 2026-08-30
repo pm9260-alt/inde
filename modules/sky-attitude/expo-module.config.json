@@ -1,6 +1,10 @@
 {
-  "platforms": ["ios"],
+  "platforms": [
+    "ios"
+  ],
   "ios": {
-    "modules": ["SkyAttitudeModule"]
+    "modules": [
+      "SkyAttitudeModule"
+    ]
   }
 }

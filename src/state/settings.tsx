@@ -11,14 +11,26 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { DEFAULT_VERTICAL_FOV_DEG } from '../astro/projection';
 import type { SkyEnvironment } from '../astro/visibility';
 import { DEMO_MODE_AVAILABLE } from '../config/featureFlags';
+import type { AttitudeSource } from '../sensors/useOrientation';
 
 const STORAGE_KEY = 'hoshimeguri.settings.v1';
 
 export interface Settings {
   /** カメラの垂直画角（度）。機種差と Apple の公表値の曖昧さを吸収する。 */
   readonly verticalFovDeg: number;
-  /** 利用者が手で加える方位の補正（度・東が正）。磁気偏角とは別に足される。 */
+  /**
+   * 利用者が手で加える方位の補正（度・東が正）。磁気偏角とは別に足される。
+   * 世界の側の量なので、天頂軸まわりの回転として適用される。
+   */
   readonly headingOffsetDeg: number;
+  /**
+   * 利用者が手で加える仰角の補正（度・正で狙いが上へ）。
+   * 端末の側の量。カメラの光軸が筐体に対してわずかに傾いている、といった
+   * 個体差を打ち消すためのもの。姿勢推定の誤差をここで埋めてはいけない。
+   */
+  readonly pitchOffsetDeg: number;
+  /** 使いたい姿勢の取得経路。auto はこのビルドで最も精度の高いものを選ぶ。 */
+  readonly attitudeSource: AttitudeSource;
   /** 空の明るさの想定。 */
   readonly environment: SkyEnvironment;
   /** 肉眼で見えそうな星だけを描くか。false なら暗い星もうっすら描く。 */
@@ -33,6 +45,8 @@ export interface Settings {
 export const DEFAULT_SETTINGS: Settings = {
   verticalFovDeg: DEFAULT_VERTICAL_FOV_DEG,
   headingOffsetDeg: 0,
+  pitchOffsetDeg: 0,
+  attitudeSource: 'auto',
   environment: 'city',
   onlyVisibleStars: true,
   demoMode: false,
@@ -104,6 +118,14 @@ export const useSettings = (): SettingsContextValue => {
 const sanitize = (settings: Settings): Settings => ({
   verticalFovDeg: clamp(settings.verticalFovDeg, 40, 100, DEFAULT_SETTINGS.verticalFovDeg),
   headingOffsetDeg: clamp(settings.headingOffsetDeg, -30, 30, 0),
+  // 光軸の傾きは大きくても 2〜3°。それを超える値を許すと、姿勢推定の
+  // 不具合をここで隠せてしまう。原因を見えなくしないために範囲を狭くする。
+  pitchOffsetDeg: clamp(settings.pitchOffsetDeg, -5, 5, 0),
+  attitudeSource: (['auto', 'fusion', 'native', 'arkit'] as const).includes(
+    settings.attitudeSource,
+  )
+    ? settings.attitudeSource
+    : DEFAULT_SETTINGS.attitudeSource,
   environment: (['city', 'suburb', 'rural', 'dark'] as const).includes(settings.environment)
     ? settings.environment
     : DEFAULT_SETTINGS.environment,

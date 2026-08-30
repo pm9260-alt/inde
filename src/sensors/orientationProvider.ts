@@ -5,17 +5,21 @@
  *
  *   fusion … expo-sensors の重力と地磁気から自前で組み立てる。
  *            Expo Go でそのまま動くので、Apple Developer Program に
- *            入らなくても実機で試せる。MVP の既定。
+ *            入らなくても実機で試せる。
  *   native … CMDeviceMotion のクォータニオンを .xTrueNorthZVertical 基準で
  *            そのまま受け取る（modules/sky-attitude）。Apple 自身の
  *            センサー融合を使うので fusion より安定する。dev build が必要。
  *   arkit  … ARSession(worldAlignment: .gravityAndHeading) による姿勢。
- *            視覚情報を併用するため磁気外乱に強い。将来の拡張。
+ *            カメラ映像の特徴点追跡を併用するため、いったん向きが定まれば
+ *            その後は地磁気にほとんど依存せず、磁気の乱れに強い。
+ *            ただし最初の方位はコンパスから取るので、絶対方位の偏りは残る。
+ *            カメラを占有するので、映像も ARKit 側から出す。dev build が必要。
  *
  * どの実装も「DEV → 真北基準 ENU の回転」を返すことだけを約束する。
  * 磁気偏角の補正と手動の方位補正は、実装ごとではなくここで一括して足す。
  */
 import type { Quat } from '../astro/math';
+import type { AttitudeCorrection } from './corrections';
 
 /** 方位の信頼度。UI の警告と、較正を促すかどうかの判断に使う。 */
 export type OrientationAccuracy =
@@ -29,11 +33,18 @@ export type OrientationAccuracy =
   | 'ok';
 
 export interface OrientationSample {
-  /** DEV → 真北基準 ENU の回転。 */
+  /** DEV → 真北基準 ENU の回転。補正を適用済み。 */
   readonly attitude: Quat;
   readonly accuracy: OrientationAccuracy;
   /** 磁力（マイクロテスラ）。診断表示に使う。 */
   readonly fieldMagnitude: number;
+  /** ARKit の追跡状態。ほかの経路では undefined。 */
+  readonly trackingState?: string;
+  /**
+   * 重力による検算のずれ（度）。ARKit 経路のみ。
+   * 座標系の読み替えが正しければ 0 に近い。大きければ軸の取り違え。
+   */
+  readonly gravityErrorDeg?: number;
 }
 
 export type OrientationListener = (sample: OrientationSample) => void;
@@ -50,17 +61,14 @@ export interface OrientationProvider {
    */
   start(listener: OrientationListener): Promise<() => void>;
   /**
-   * 方位の補正を渡す。姿勢を出力する直前に適用される。
+   * 補正を渡す。姿勢を出力する直前に適用される。
    *
    * 磁気偏角を足すべきかどうかは実装によって違う。自前の TRIAD は磁北基準
-   * なので必ず要るが、CoreMotion の .xTrueNorthZVertical はすでに真北基準
-   * なので足してはいけない。判断を呼び出し側に持たせないよう、2 つの値を
-   * 別々に渡し、どう使うかは実装に委ねる。
-   *
-   * @param declinationDeg 磁北から真北へのずれ（度・東が正）
-   * @param manualDeg      利用者が手で加える補正（度・東が正）
+   * なので必ず要るが、CoreMotion の .xTrueNorthZVertical と ARKit の
+   * .gravityAndHeading はすでに真北基準なので足してはいけない。判断を
+   * 呼び出し側に持たせないよう、値をそのまま渡して実装に委ねる。
    */
-  setHeadingCorrection(declinationDeg: number, manualDeg: number): void;
+  setCorrection(correction: AttitudeCorrection): void;
   /**
    * 方位が実際の方角と合っている必要がない状態か（デモ）。
    *

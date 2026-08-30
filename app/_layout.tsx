@@ -39,6 +39,10 @@ export default function RootLayout() {
               name="tune"
               options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
             />
+            <Stack.Screen
+              name="accuracy"
+              options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
+            />
           </Stack>
         </SettingsProvider>
       </SafeAreaProvider>
