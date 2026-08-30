@@ -10,6 +10,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 
 import { DEFAULT_VERTICAL_FOV_DEG } from '../astro/projection';
 import type { SkyEnvironment } from '../astro/visibility';
+import { DEMO_MODE_AVAILABLE } from '../config/featureFlags';
 
 const STORAGE_KEY = 'hoshimeguri.settings.v1';
 
@@ -22,6 +23,11 @@ export interface Settings {
   readonly environment: SkyEnvironment;
   /** 肉眼で見えそうな星だけを描くか。false なら暗い星もうっすら描く。 */
   readonly onlyVisibleStars: boolean;
+  /**
+   * デモモード。実際の季節・時刻・現在地を無視して、端末を上へ向けるだけで
+   * オリオン座が視野に現れる。開発ビルドでのみ使える。
+   */
+  readonly demoMode: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -29,6 +35,7 @@ export const DEFAULT_SETTINGS: Settings = {
   headingOffsetDeg: 0,
   environment: 'city',
   onlyVisibleStars: true,
+  demoMode: false,
 };
 
 interface SettingsContextValue {
@@ -104,6 +111,8 @@ const sanitize = (settings: Settings): Settings => ({
     typeof settings.onlyVisibleStars === 'boolean'
       ? settings.onlyVisibleStars
       : DEFAULT_SETTINGS.onlyVisibleStars,
+  // デモを含まないビルドでは、保存値がどうであれ必ず切る。
+  demoMode: DEMO_MODE_AVAILABLE && settings.demoMode === true,
 });
 
 const clamp = (value: number, min: number, max: number, fallback: number): number =>

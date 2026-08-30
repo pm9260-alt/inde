@@ -1,74 +1,91 @@
 /**
  * 星空の描画面。カメラ映像の上に重ねる。
  *
- * React の再描画とは切り離してある。姿勢は ref から毎フレーム読み、
- * 選択状態などの変化も ref を介して渡す。星空が 60fps で動いているあいだ、
- * React は何もしない。
+ * React の再描画とは切り離してある。姿勢も演出の進み具合も ref から毎フレーム
+ * 読む。星空が 60fps で動いているあいだ、React は何もしない。
+ *
+ * 描く順（後のものが上に重なる）
+ *   1. 星表の星     20 秒に一度しか変わらない静的なバッファ
+ *   2. 星座線       毎フレーム、演出の進み具合に応じて組み立て直す
+ *   3. 強調の星     演出で灯る星と、物語がいま語っている星
+ *   4. 登場人物     3D モデルが入るまでは置き場所を示す枠
+ *
+ * 本番とデモで通る道は同じ。違うのは model の作られ方と、演出の起点だけ。
  */
 import { GLView, type ExpoWebGLRenderingContext } from 'expo-gl';
 import { useCallback, useEffect, useRef } from 'react';
 import { StyleSheet, View, type LayoutChangeEvent } from 'react-native';
 
-import type { Quat } from '../astro/math';
+import type { Quat, Vec3 } from '../astro/math';
 import { makeProjection, type CameraProjection, type Viewport } from '../astro/projection';
+import { directionAt, starIndexByHr } from '../astro/sky';
+import { SHOW_FIGURE_PLACEHOLDER } from '../config/featureFlags';
+import { asterismById } from '../data/constellations';
+import { figureById, hasModel } from '../data/figures';
+import { STAR_CATALOG } from '../data/stars.generated';
 import { rgbFromHex } from '../design/color';
-import { color, duration, stroke } from '../design/tokens';
+import { color, starStyle, stroke } from '../design/tokens';
+import { computeFigureFrame, frameEdges } from './figurePlacement';
 import { LineLayer, type SkySegment } from './gl/lineLayer';
-import { StarLayer } from './gl/starLayer';
+import { sizeForMagnitude, StarLayer, type StarPoint } from './gl/starLayer';
 import {
   identityMat4,
   multiplyMat4,
   perspectiveMatrix,
   viewMatrixFromAttitude,
 } from './matrix';
+import { createStagingScratch, evaluateStaging, type StagingClock } from './staging';
 import type { SkyModel } from './useSkyModel';
 
 const LINE_REST = rgbFromHex(color.sky.line);
 const LINE_GUIDE = rgbFromHex(color.sky.guide);
 const LINE_ACTIVE = rgbFromHex(color.ember.core);
+const EMBER = rgbFromHex(color.ember.core);
+const FIGURE_FRAME = rgbFromHex(color.ember.deep);
 
-/** 未選択・未照準の星座線の濃さ。空を邪魔しない程度に抑える。 */
+/** 演出していない星座線の濃さ。空を邪魔しない程度に抑える。 */
 const OPACITY_IDLE = 0.3;
-/** 端末を向けている星座の線。 */
-const OPACITY_AIMED = 0.72;
-/** 選択した星座の線。 */
-const OPACITY_SELECTED = 0.95;
+/** 演出中・演出後の星座線。 */
+const OPACITY_ACTIVE = 0.9;
+
+/** 強調された星をどれだけ大きくするか。控えめに。 */
+const EMPHASIS_SIZE_GAIN = 0.5;
+/** 強調の色を橙へどれだけ寄せるか。 */
+const EMPHASIS_TINT = 0.45;
+/** 強調の明るさの上限。上の星を白飛びさせない。 */
+const EMPHASIS_ALPHA = 0.8;
 
 export interface SkyCanvasHandles {
-  /** 端末が向いている先の星座 ID。線を明るくする。 */
+  /** 端末が向いている先の星座 ID。 */
   aimedId: string | null;
-  /** 選択中の星座 ID。線を橙にして描き進める。 */
-  selectedId: string | null;
-  /** 星空全体の不透明度。神話を読むあいだ沈める。 */
+  /** 演出中の星座 ID と、その起点。 */
+  stagedId: string | null;
+  clock: StagingClock;
+  /** 星空全体の不透明度。神話を読むあいだ沈めるのに使う。 */
   opacity: number;
-  /** いま物語が語っている星。大きく橙に描く。 */
+  /** いま物語が語っている星。 */
   highlightHrs: ReadonlySet<number>;
 }
 
 interface Props {
   readonly model: SkyModel;
   readonly attitudeRef: React.RefObject<Quat>;
-  /** 選択・照準の状態。毎フレーム読むので ref で渡す。 */
+  /** 照準と演出の状態。毎フレーム読むので ref で渡す。 */
   readonly handlesRef: React.RefObject<SkyCanvasHandles>;
   readonly verticalFovDeg: number;
 }
 
 export const SkyCanvas = ({ model, attitudeRef, handlesRef, verticalFovDeg }: Props) => {
   const viewportRef = useRef<Viewport>({ width: 1, height: 1 });
-  const projectionRef = useRef<CameraProjection>(makeProjection({ width: 1, height: 1 }, verticalFovDeg));
+  const projectionRef = useRef<CameraProjection>(
+    makeProjection({ width: 1, height: 1 }, verticalFovDeg),
+  );
   const modelRef = useRef(model);
-  const starLayerRef = useRef<StarLayer | null>(null);
-  const lineLayerRef = useRef<LineLayer | null>(null);
   /** 星空データを送り直す必要があるか。 */
   const starsDirtyRef = useRef(true);
-  /** 選択が変わった時刻。線を引く演出の起点。 */
-  const selectionStartRef = useRef(0);
-  const previousSelectedRef = useRef<string | null>(null);
   /** 実行中の描画ループ。画面を離れるときに止める。 */
   const frameHandleRef = useRef(0);
   const disposeRef = useRef<(() => void) | null>(null);
-  /** 直前に頂点バッファへ反映した強調対象。変わったときだけ作り直す。 */
-  const highlightRef = useRef<ReadonlySet<number> | null>(null);
 
   modelRef.current = model;
   useEffect(() => {
@@ -88,96 +105,157 @@ export const SkyCanvas = ({ model, attitudeRef, handlesRef, verticalFovDeg }: Pr
     projectionRef.current = makeProjection(viewportRef.current, verticalFovDeg);
   }, [verticalFovDeg]);
 
-  const onContextCreate = useCallback((gl: ExpoWebGLRenderingContext) => {
-    const starLayer = new StarLayer(gl);
-    const lineLayer = new LineLayer(gl);
-    starLayerRef.current = starLayer;
-    lineLayerRef.current = lineLayer;
+  const onContextCreate = useCallback(
+    (gl: ExpoWebGLRenderingContext) => {
+      const starLayer = new StarLayer(gl);
+      const emphasisLayer = new StarLayer(gl);
+      const lineLayer = new LineLayer(gl);
 
-    gl.disable(gl.DEPTH_TEST);
-    gl.enable(gl.BLEND);
-    // 星も星座線も「光」なので加算合成。あらかじめ色に不透明度を掛けてある。
-    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
-    gl.clearColor(0, 0, 0, 0);
+      gl.disable(gl.DEPTH_TEST);
+      gl.enable(gl.BLEND);
+      // 色にはあらかじめ不透明度を掛けてある（乗算済みアルファ）。
+      gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+      gl.clearColor(0, 0, 0, 0);
 
-    const viewMatrix = identityMat4();
-    const projectionMatrix = identityMat4();
-    const viewProjection = identityMat4();
-    const segmentBuffer: SkySegment[] = [];
+      const viewMatrix = identityMat4();
+      const projectionMatrix = identityMat4();
+      const viewProjection = identityMat4();
+      const segmentBuffer: SkySegment[] = [];
+      const pointBuffer: StarPoint[] = [];
+      const scratch = createStagingScratch();
 
-    const render = () => {
-      frameHandleRef.current = requestAnimationFrame(render);
+      const render = () => {
+        frameHandleRef.current = requestAnimationFrame(render);
 
-      const viewport = viewportRef.current;
-      const projection = projectionRef.current;
-      const attitude = attitudeRef.current;
-      const handles = handlesRef.current;
-      const currentModel = modelRef.current;
-      const pixelRatio = viewport.width > 0 ? gl.drawingBufferWidth / viewport.width : 1;
+        const viewport = viewportRef.current;
+        const projection = projectionRef.current;
+        const attitude = attitudeRef.current;
+        const handles = handlesRef.current;
+        const currentModel = modelRef.current;
+        const pixelRatio = viewport.width > 0 ? gl.drawingBufferWidth / viewport.width : 1;
+        const now = Date.now();
 
-      if (starsDirtyRef.current || highlightRef.current !== handles.highlightHrs) {
-        highlightRef.current = handles.highlightHrs;
-        starLayer.setStars(
-          currentModel.snapshot.directions,
-          currentModel.snapshot.altitudes,
-          currentModel.brightness,
-          handles.highlightHrs,
+        const staged = handles.stagedId ? asterismById(handles.stagedId) : null;
+        const state = evaluateStaging(staged, handles.clock, now, scratch);
+        const opacity = handles.opacity * state.skyOpacity;
+
+        if (starsDirtyRef.current) {
+          starLayer.setStars(
+            currentModel.snapshot.directions,
+            currentModel.snapshot.altitudes,
+            currentModel.brightness,
+          );
+          starsDirtyRef.current = false;
+        }
+
+        gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+
+        viewMatrixFromAttitude(attitude, viewMatrix);
+        perspectiveMatrix(
+          projection.verticalFovDeg,
+          viewport.width / viewport.height,
+          projectionMatrix,
         );
-        starsDirtyRef.current = false;
-      }
+        multiplyMat4(projectionMatrix, viewMatrix, viewProjection);
 
-      if (previousSelectedRef.current !== handles.selectedId) {
-        previousSelectedRef.current = handles.selectedId;
-        selectionStartRef.current = Date.now();
-      }
+        starLayer.draw({ viewProjection, pixelRatio, opacity });
 
-      gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
-      gl.clear(gl.COLOR_BUFFER_BIT);
+        // --- 星座線 ---------------------------------------------------------
+        segmentBuffer.length = 0;
+        for (const segment of currentModel.segments) {
+          const isStaged = segment.asterismId === handles.stagedId;
+          const isAimed = segment.asterismId === handles.aimedId;
 
-      viewMatrixFromAttitude(attitude, viewMatrix);
-      perspectiveMatrix(
-        projection.verticalFovDeg,
-        viewport.width / viewport.height,
-        projectionMatrix,
-      );
-      multiplyMat4(projectionMatrix, viewMatrix, viewProjection);
+          if (!isStaged) {
+            segmentBuffer.push({
+              from: segment.from,
+              to: segment.to,
+              color: isAimed ? LINE_REST : LINE_GUIDE,
+              opacity: OPACITY_IDLE * opacity,
+              width: stroke.line,
+            });
+            continue;
+          }
 
-      starLayer.draw({ viewProjection, pixelRatio, opacity: handles.opacity });
+          // 演出中の線は 2 本重ねる。
+          //   ・下地: これから引かれる道筋。薄いまま最後まで残す。
+          //   ・本線: 端から伸びていく明るい線。
+          // こうすると、線が消えてから引き直されるのではなく、
+          // すでにそこにあったものが灯っていくように見える。
+          const progress = state.lineProgress[segment.indexInAsterism] ?? 0;
+          segmentBuffer.push({
+            from: segment.from,
+            to: segment.to,
+            color: LINE_REST,
+            opacity: OPACITY_IDLE * (1 - 0.4 * progress) * opacity,
+            width: stroke.line,
+          });
+          if (progress <= 0) continue;
+          segmentBuffer.push({
+            from: segment.from,
+            to: segment.to,
+            color: LINE_ACTIVE,
+            // 引かれ始めの先端が硬い点に見えないよう、序盤は薄く入る。
+            opacity: OPACITY_ACTIVE * Math.min(1, progress / 0.35) * opacity,
+            width: stroke.lineActive,
+            progress,
+          });
+        }
 
-      // 星座線を組み立てる。選択中の星座は端から引かれていく。
-      const drawProgress = handles.selectedId
-        ? Math.min(1, (Date.now() - selectionStartRef.current) / duration.draw)
-        : 1;
-      segmentBuffer.length = 0;
-      for (const segment of currentModel.segments) {
-        const selected = segment.asterismId === handles.selectedId;
-        const aimed = segment.asterismId === handles.aimedId;
-        segmentBuffer.push({
-          from: segment.from,
-          to: segment.to,
-          color: selected ? LINE_ACTIVE : aimed ? LINE_REST : LINE_GUIDE,
-          opacity:
-            (selected ? OPACITY_SELECTED : aimed ? OPACITY_AIMED : OPACITY_IDLE) *
-            handles.opacity,
-          width: selected ? stroke.lineActive : stroke.line,
-          progress: selected ? drawProgress : 1,
-        });
-      }
-      lineLayer.setSegments(segmentBuffer, attitude, projection, viewport);
-      lineLayer.draw(viewport);
+        // --- 登場人物の枠 ---------------------------------------------------
+        if (staged && state.figureOpacity > 0.004 && SHOW_FIGURE_PLACEHOLDER) {
+          const figure = staged.figureId ? figureById(staged.figureId) : null;
+          // 実物の 3D モデルが入ったら、枠ではなくそちらを描く。
+          if (figure && !hasModel(figure)) {
+            const frame = computeFigureFrame(
+              figure,
+              (hr) => directionAt(currentModel.snapshot, starIndexByHr(hr)),
+              state.figureScale,
+            );
+            if (frame) {
+              for (const edge of frameEdges(frame)) {
+                segmentBuffer.push({
+                  from: edge.from,
+                  to: edge.to,
+                  color: FIGURE_FRAME,
+                  opacity: state.figureOpacity * 0.55 * opacity,
+                  width: stroke.line,
+                });
+              }
+            }
+          }
+        }
 
-      gl.endFrameEXP();
-    };
-    render();
+        lineLayer.setSegments(segmentBuffer, attitude, projection, viewport);
+        lineLayer.draw(viewport);
 
-    disposeRef.current = () => {
-      cancelAnimationFrame(frameHandleRef.current);
-      starLayer.dispose();
-      lineLayer.dispose();
-      starLayerRef.current = null;
-      lineLayerRef.current = null;
-    };
-  }, [attitudeRef, handlesRef]);
+        // --- 強調された星 ---------------------------------------------------
+        pointBuffer.length = 0;
+        for (const [hr, emphasis] of state.starEmphasis) {
+          appendEmphasisPoint(pointBuffer, currentModel, hr, emphasis * opacity, 1);
+        }
+        for (const hr of handles.highlightHrs) {
+          appendEmphasisPoint(pointBuffer, currentModel, hr, opacity, starStyle.highlightBoost);
+        }
+        if (pointBuffer.length > 0) {
+          emphasisLayer.setPoints(pointBuffer);
+          emphasisLayer.draw({ viewProjection, pixelRatio, opacity: 1 });
+        }
+
+        gl.endFrameEXP();
+      };
+      render();
+
+      disposeRef.current = () => {
+        cancelAnimationFrame(frameHandleRef.current);
+        starLayer.dispose();
+        emphasisLayer.dispose();
+        lineLayer.dispose();
+      };
+    },
+    [attitudeRef, handlesRef],
+  );
 
   // 画面を離れるとき、描画ループと GPU 資源を確実に手放す。
   // GLView は onContextCreate の戻り値を見ないので、ここで止める必要がある。
@@ -195,6 +273,36 @@ export const SkyCanvas = ({ model, attitudeRef, handlesRef, verticalFovDeg }: Pr
       <GLView style={styles.canvas} onContextCreate={onContextCreate} />
     </View>
   );
+};
+
+/**
+ * 強調された星を 1 つ積む。
+ * 通常の星の上に重ねて描くので、地平線の下や暗すぎて描かれていない星でも、
+ * 演出や物語が触れているあいだは見える。
+ */
+const appendEmphasisPoint = (
+  buffer: StarPoint[],
+  model: SkyModel,
+  hr: number,
+  strength: number,
+  sizeBoost: number,
+): void => {
+  if (strength <= 0.004) return;
+  const index = model.snapshot.indexByHr.get(hr);
+  if (index === undefined) return;
+  const star = STAR_CATALOG[index];
+  const direction: Vec3 = directionAt(model.snapshot, index);
+  const tint = EMPHASIS_TINT * strength;
+  buffer.push({
+    direction,
+    color: [
+      star.color[0] + (EMBER[0] - star.color[0]) * tint,
+      star.color[1] + (EMBER[1] - star.color[1]) * tint,
+      star.color[2] + (EMBER[2] - star.color[2]) * tint,
+    ],
+    size: sizeForMagnitude(star.mag) * sizeBoost * (1 + EMPHASIS_SIZE_GAIN * strength),
+    brightness: strength * EMPHASIS_ALPHA,
+  });
 };
 
 const styles = StyleSheet.create({

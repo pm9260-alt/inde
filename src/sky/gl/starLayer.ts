@@ -13,8 +13,8 @@
  * 色は彩度を大きく落とす。実際の夜空で色がわかるのはベテルギウスや
  * アンタレスのような一部だけで、全部が色づいていると嘘になる。
  */
-import { rgbFromHex } from '../../design/color';
-import { color, starStyle } from '../../design/tokens';
+import type { Vec3 } from '../../astro/math';
+import { starStyle } from '../../design/tokens';
 import { STAR_CATALOG } from '../../data/stars.generated';
 import { ALL_MEMBER_HRS } from '../../data/constellations';
 import { createProgram, type GL } from './program';
@@ -72,9 +72,6 @@ export const sizeForMagnitude = (magnitude: number): number => {
   return Math.min(starStyle.maxSizePx, Math.max(starStyle.minSizePx, size));
 };
 
-/** 物語が語っている星の色。空の色から浮き上がるよう橙に寄せる。 */
-const HIGHLIGHT_TINT = rgbFromHex(color.ember.core) as [number, number, number];
-
 /** 星の色を、彩度を落としてから返す。 */
 const desaturate = (color: readonly [number, number, number]): [number, number, number] => {
   const s = starStyle.saturation;
@@ -84,6 +81,16 @@ const desaturate = (color: readonly [number, number, number]): [number, number, 
     1 + (color[2] - 1) * s,
   ];
 };
+
+/** setPoints に渡す 1 点。 */
+export interface StarPoint {
+  readonly direction: Vec3;
+  readonly color: readonly [number, number, number];
+  /** 見かけの直径（論理ピクセル）。 */
+  readonly size: number;
+  /** 明るさ（0〜1）。 */
+  readonly brightness: number;
+}
 
 export interface StarLayerFrame {
   readonly viewProjection: Mat4;
@@ -132,13 +139,11 @@ export class StarLayer {
    * @param directions 星表と同じ並びの ENU 単位ベクトル
    * @param altitudes  星表と同じ並びの高度（度）
    * @param brightness 星ごとの見え方（0〜1）。0 の星は送らない。
-   * @param highlight  いま物語が語っている星の HR 番号。大きく、橙に寄せて描く。
    */
   setStars(
     directions: Float32Array,
     altitudes: Float32Array,
     brightness: Float32Array,
-    highlight?: ReadonlySet<number>,
   ): void {
     const data = this.vertexData;
     let offset = 0;
@@ -146,11 +151,10 @@ export class StarLayer {
       // 地平線の下にある星は描かない。地面を透かして星が見えることはない。
       if (altitudes[i] < -1) continue;
       const value = brightness[i];
-      if (value <= 0.02 && !(highlight?.has(STAR_CATALOG[i].hr) ?? false)) continue;
+      if (value <= 0.02) continue;
 
       const star = STAR_CATALOG[i];
-      const isHighlighted = highlight?.has(star.hr) ?? false;
-      const tint = isHighlighted ? HIGHLIGHT_TINT : desaturate(star.color);
+      const tint = desaturate(star.color);
       const isMember = ALL_MEMBER_HRS.has(star.hr);
 
       data[offset] = directions[i * 3];
@@ -159,14 +163,38 @@ export class StarLayer {
       data[offset + 3] = tint[0];
       data[offset + 4] = tint[1];
       data[offset + 5] = tint[2];
-      const scale = isHighlighted
-        ? starStyle.highlightBoost
-        : isMember
-          ? starStyle.memberBoost
-          : 1;
-      data[offset + 6] = sizeForMagnitude(star.mag) * scale;
-      // 物語が触れている星は、暗くても必ず見えるようにする。
-      data[offset + 7] = isHighlighted ? Math.max(value, 0.85) : value;
+      data[offset + 6] = sizeForMagnitude(star.mag) * (isMember ? starStyle.memberBoost : 1);
+      data[offset + 7] = value;
+      offset += StarLayer.STRIDE;
+    }
+    this.vertexCount = offset / StarLayer.STRIDE;
+
+    const gl = this.gl;
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.buffer);
+    gl.bufferData(gl.ARRAY_BUFFER, data.subarray(0, offset), gl.DYNAMIC_DRAW);
+  }
+
+  /**
+   * 星表とは別に、指定した点だけを描く。
+   *
+   * 演出で強調される星や、物語がいま語っている星を、通常の星の上に
+   * 重ねて描くために使う。数個から十数個しかないので、毎フレーム
+   * 作り直しても負荷にならない。
+   */
+  setPoints(points: readonly StarPoint[]): void {
+    const data = this.vertexData;
+    let offset = 0;
+    for (const point of points) {
+      if (point.brightness <= 0.004) continue;
+      if (offset + StarLayer.STRIDE > data.length) break;
+      data[offset] = point.direction.x;
+      data[offset + 1] = point.direction.y;
+      data[offset + 2] = point.direction.z;
+      data[offset + 3] = point.color[0];
+      data[offset + 4] = point.color[1];
+      data[offset + 5] = point.color[2];
+      data[offset + 6] = point.size;
+      data[offset + 7] = point.brightness;
       offset += StarLayer.STRIDE;
     }
     this.vertexCount = offset / StarLayer.STRIDE;

@@ -78,6 +78,7 @@ export class LineLayer {
 
   /** 1 頂点あたり: 画面座標 2 + 側 1 + 色 4 */
   private static readonly STRIDE = 7;
+  // 全星座の線（38 本）＋ 演出中の星座の重ね描き ＋ 登場人物の枠。
   private static readonly MAX_SEGMENTS = 128;
 
   private readonly vertexData = new Float32Array(

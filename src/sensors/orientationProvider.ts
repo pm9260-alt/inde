@@ -61,4 +61,12 @@ export interface OrientationProvider {
    * @param manualDeg      利用者が手で加える補正（度・東が正）
    */
   setHeadingCorrection(declinationDeg: number, manualDeg: number): void;
+  /**
+   * 方位が実際の方角と合っている必要がない状態か（デモ）。
+   *
+   * true のあいだは、地磁気が未較正でも傾きだけで姿勢を作り始める。
+   * 屋内では地磁気が乱れて較正できないことが多く、それでもデモは
+   * 成立しなければならないため。本番では false のままにすること。
+   */
+  setHeadingFree(enabled: boolean): void;
 }

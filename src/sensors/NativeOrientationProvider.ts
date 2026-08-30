@@ -79,6 +79,12 @@ export class NativeOrientationProvider implements OrientationProvider {
     this.manual = manualDeg;
   }
 
+  /**
+   * CoreMotion は地磁気が未較正でも姿勢を返し続けるので、こちらでは何もしない。
+   * 方位が実際とずれるだけで、姿勢そのものは得られる。
+   */
+  setHeadingFree(): void {}
+
   async start(listener: OrientationListener): Promise<() => void> {
     const module = nativeModule;
     if (!module) throw new Error('SkyAttitude モジュールがこのビルドに含まれていません');

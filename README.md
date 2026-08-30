@@ -18,6 +18,7 @@ iPhone アプリ。
 5. 神話は場面ごとに進み、語られている星が空の側で光る
 6. 光害・薄明・月明かりから、見えるはずの星だけを選ぶ
 7. 実際の空とのずれを、その場で詰められる
+8. **デモ表示** — 昼でも屋内でも、端末を上へ向けるだけでオリオン座が現れる
 
 ---
 
@@ -34,6 +35,10 @@ QR コードを iPhone の標準カメラで読むと、Expo Go でアプリが�
 詳しくは **[docs/SETUP-WINDOWS.md](docs/SETUP-WINDOWS.md)**。
 
 初回は、外に出て端末を 8 の字に振ってください（地磁気センサーの較正）。
+
+外に出られないときは **「調整」→「デモ」→ デモ表示: 入** にして、端末を
+上へ向けてください。季節も時刻も現在地も関係なくオリオン座が形成されます。
+詳しくは **[docs/DEMO-AND-FIGURES.md](docs/DEMO-AND-FIGURES.md)**。
 
 ---
 
@@ -81,9 +86,9 @@ TRIAD 法で回転行列を直接組み立て、オイラー角を一切経由�
 ```
 app/                       画面（expo-router）
   index.tsx                スカイビュー。アプリの本体
-  tune.tsx                 調整。ずれを詰める
+  tune.tsx                 調整。ずれを詰める／デモの切り替え
 src/
-  design/tokens.ts         色・文字・余白・時間。視覚の唯一の出所
+  design/tokens.ts         色・文字・余白・演出の間。視覚の唯一の出所
   astro/                   天体計算。純粋な TypeScript で実機不要
     sky.ts                 J2000 赤道座標 → いまここの地平座標
     projection.ts          地平座標 → 画面
@@ -92,13 +97,22 @@ src/
   sensors/
     attitude.ts            姿勢推定（純粋関数）
     orientationProvider.ts 姿勢の取得口。fusion / native / arkit
-  sky/                     描画と選択
-  data/                    星表・星座線・神話
+  sky/
+    staging.ts             演出。本番もデモもここ一箇所を通る
+    demoSky.ts             基準の空を回して星座を視野へ置く
+    figurePlacement.ts     3D の登場人物をどこに置くか
+    SkyCanvas.tsx          描画
+  data/                    星表・星座線・神話・登場人物
   ui/                      画面部品
+  config/featureFlags.ts   公開ビルドでデモを外す判定
 modules/sky-attitude/      Swift モジュール（任意。dev build 用）
 scripts/                   星表とアイコンの生成
 docs/                      手順書
 ```
+
+演出は `src/sky/staging.ts` の 1 関数にまとまっています。「経過時間 →
+見え方」を返すだけの純粋な関数なので、本番とデモで二重に持つ必要がなく、
+動きの設計そのものをテストできます。
 
 星の位置と姿勢の計算は、React にも実機にも依存しない純粋な TypeScript に
 切り出してあります。Windows 上で `npm test` を走らせるだけで、座標変換の
@@ -109,7 +123,7 @@ docs/                      手順書
 ## 検証
 
 ```powershell
-npm test        # 190 件
+npm test        # 247 件
 npm run typecheck
 ```
 
@@ -122,6 +136,9 @@ npm run typecheck
 - 星座線の HR 番号に打ち間違いがない（実座標で幾何的に検査）
 - 大気路程・極限等級・月明かりが文献値と一致する
 - 画面への投影で上下左右が反転していない
+- 演出の順序が守られ、線が途中で戻らず、必ず終わる
+- デモの空が剛体回転になっている（星どうしの角距離が変わらない）
+- 地磁気が失われても傾きを追い続け、方位が保たれる
 
 ---
 
@@ -148,9 +165,10 @@ npm run typecheck
 
 構造としてすでに用意してあり、実装だけが残っているもの：
 
+- **3D の登場人物**。置き場所・大きさ・出現の間合いは実装済みで、いまは
+  枠だけが出ます。GLB を `src/data/figures.ts` に差せば入れ替わります
+  （[docs/DEMO-AND-FIGURES.md](docs/DEMO-AND-FIGURES.md)）
 - **ARKit による姿勢**（`worldAlignment: .gravityAndHeading`）。姿勢の取得口は
   差し替えられる形になっています
-- **神話の AR 演出**。場面ごとに `figure`（登場人物・怪物）を持たせてあり、
-  いまは識別子だけを保持しています
 - **星座の追加**。`src/data/constellations.ts` に HR 番号で書き足すだけで、
   整合性は自動で検査されます

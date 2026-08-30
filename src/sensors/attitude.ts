@@ -36,6 +36,7 @@ import {
   quatMultiply,
   quatNormalize,
   QUAT_IDENTITY,
+  rotateInverse,
   scale,
   slerp,
   sub,
@@ -87,6 +88,48 @@ export const attitudeFromGravityAndField = (
     up.x, up.y, up.z,
   ];
   return quatFromMat3(matrix);
+};
+
+/**
+ * 重力だけから姿勢を作る。
+ *
+ * 保証するのは**傾きだけ**。方位は前の推定から引き継ぐが、その引き継ぎは
+ * 近似でしかない（前の姿勢での「北」を、いまの端末座標のものとして使うため、
+ * 姿勢が大きく変わった直後はずれる）。
+ *
+ * これで足りるのは、この値を updateFusion が swing 成分だけ取り出して使う
+ * から。天頂軸まわりの成分は捨てられるので、方位の近似誤差は入らない。
+ * 第二の軸を定めるための足場、と考えるのが正しい。
+ *
+ * 使いどころは 2 つ。
+ *   ・地磁気が一時的に使えなくなったとき。傾きだけでも追従を続けたほうが、
+ *     表示が固まるより良い。方位は直前の推定が保たれる。
+ *   ・デモモード。実際の方角と合っている必要がないので、方位は任意でよい。
+ *
+ * @param previous 前の姿勢。無い場合は方位を任意に決める。
+ */
+export const attitudeFromGravityOnly = (gravity: Vec3, previous: Quat | null): Quat | null => {
+  const up = normalize(scale(gravity, -1));
+  if (!up) return null;
+
+  // 前の姿勢が指していた北を端末座標へ戻し、天頂成分を抜いて水平にする。
+  // 前が無ければ、天頂と平行でない適当な軸から作る。
+  const reference = previous
+    ? rotateInverse(previous, vec(0, 1, 0))
+    : Math.abs(up.z) < 0.9
+      ? vec(0, 0, 1)
+      : vec(1, 0, 0);
+  const north = normalize(sub(reference, scale(up, dot(reference, up))));
+  if (!north) return null;
+
+  const east = normalize(cross(north, up));
+  if (!east) return null;
+
+  return quatFromMat3([
+    east.x, east.y, east.z,
+    north.x, north.y, north.z,
+    up.x, up.y, up.z,
+  ]);
 };
 
 /** 角速度（端末座標系, rad/s）で姿勢を dt 秒ぶん進める。 */
@@ -169,6 +212,18 @@ export const DEFAULT_FUSION_TUNING: FusionTuning = {
   fieldBaselineSmoothing: 0.01,
 };
 
+/** 融合の振る舞いを切り替える。 */
+export interface FusionOptions {
+  /**
+   * 地磁気が使えないまま姿勢を作り始めてよいか。
+   * 方位が任意の値になるので、実際の空を重ねる本番では false。
+   * 方角が合っている必要のないデモでのみ true にする。
+   */
+  readonly allowHeadingFreeStart: boolean;
+}
+
+export const DEFAULT_FUSION_OPTIONS: FusionOptions = { allowHeadingFreeStart: false };
+
 export interface FusionState {
   /** DEV → 磁北基準 ENU。まだ観測が得られていなければ null。 */
   readonly attitude: Quat | null;
@@ -207,12 +262,34 @@ export const updateFusion = (
   gravity: Vec3,
   magneticField: Vec3,
   tuning: FusionTuning = DEFAULT_FUSION_TUNING,
+  options: FusionOptions = DEFAULT_FUSION_OPTIONS,
 ): FusionState => {
   const fieldMagnitude = length(magneticField);
   const observed = attitudeFromGravityAndField(gravity, magneticField);
   if (!observed) {
-    // 方位が決められない。傾きだけでも保てるよう姿勢は捨てない。
-    return { ...state, magneticDisturbed: false, fieldMagnitude };
+    // 地磁気が使えない。傾きだけは重力から追い続ける。
+    // 方位は前の推定を引き継ぐので、ここで狂うことはない。
+    const fallback = attitudeFromGravityOnly(
+      gravity,
+      state.attitude ?? (options.allowHeadingFreeStart ? null : QUAT_IDENTITY),
+    );
+    if (!fallback || (!state.attitude && !options.allowHeadingFreeStart)) {
+      return { ...state, magneticDisturbed: false, fieldMagnitude };
+    }
+    if (!state.attitude) {
+      // 方位を問わない用途（デモ）でのみ、磁気なしで始める。
+      return { ...state, attitude: fallback, magneticDisturbed: false, fieldMagnitude };
+    }
+    const delta = quatMultiply(fallback, quatConjugate(state.attitude));
+    const { swing } = splitAroundVertical(delta);
+    return {
+      ...state,
+      attitude: quatNormalize(
+        quatMultiply(partialRotation(swing, tuning.tiltCorrection), state.attitude),
+      ),
+      magneticDisturbed: false,
+      fieldMagnitude,
+    };
   }
 
   const up = normalize(scale(gravity, -1));
@@ -221,8 +298,8 @@ export const updateFusion = (
     ? 90 - Math.acos(Math.max(-1, Math.min(1, dot(magneticField, up) / fieldMagnitude))) * (180 / Math.PI)
     : 0;
 
-  // 初回は観測をそのまま採用し、基準値もそこから始める。
-  if (!state.attitude || state.baselineMagnitudeUt === 0) {
+  // 姿勢がまだ無ければ、観測をそのまま採用する。
+  if (!state.attitude) {
     return {
       attitude: observed,
       baselineMagnitudeUt: fieldMagnitude,
@@ -232,20 +309,30 @@ export const updateFusion = (
     };
   }
 
+  // 傾きだけで立ち上げたあとに地磁気が使えるようになった場合。
+  // 姿勢はすでにあるので置き換えない。基準値だけを埋めて、方位を
+  // どれだけ寄せるかは通常の補正（headingCorrection）に委ねる。
+  // ここで観測をそのまま採用すると、デモ中に空が回ってしまう。
+  const attitude = state.attitude;
+  const current: FusionState =
+    state.baselineMagnitudeUt === 0
+      ? { ...state, baselineMagnitudeUt: fieldMagnitude, baselineInclinationDeg: inclinationDeg }
+      : state;
+
   const disturbed =
-    Math.abs(fieldMagnitude - state.baselineMagnitudeUt) > tuning.fieldMagnitudeToleranceUt ||
-    Math.abs(inclinationDeg - state.baselineInclinationDeg) > tuning.fieldInclinationToleranceDeg;
+    Math.abs(fieldMagnitude - current.baselineMagnitudeUt) > tuning.fieldMagnitudeToleranceUt ||
+    Math.abs(inclinationDeg - current.baselineInclinationDeg) > tuning.fieldInclinationToleranceDeg;
 
   // 外乱中は基準値を汚さない。
   const baselineMagnitudeUt = disturbed
-    ? state.baselineMagnitudeUt
-    : emaScalar(state.baselineMagnitudeUt, fieldMagnitude, tuning.fieldBaselineSmoothing);
+    ? current.baselineMagnitudeUt
+    : emaScalar(current.baselineMagnitudeUt, fieldMagnitude, tuning.fieldBaselineSmoothing);
   const baselineInclinationDeg = disturbed
-    ? state.baselineInclinationDeg
-    : emaScalar(state.baselineInclinationDeg, inclinationDeg, tuning.fieldBaselineSmoothing);
+    ? current.baselineInclinationDeg
+    : emaScalar(current.baselineInclinationDeg, inclinationDeg, tuning.fieldBaselineSmoothing);
 
   // 現在の推定から観測へ向かう回転（ENU での回転）。
-  const delta = quatMultiply(observed, quatConjugate(state.attitude));
+  const delta = quatMultiply(observed, quatConjugate(attitude));
   const { twist, swing } = splitAroundVertical(delta);
   const headingGain = disturbed ? 0 : tuning.headingCorrection;
   const correction = quatMultiply(
@@ -254,7 +341,7 @@ export const updateFusion = (
   );
 
   return {
-    attitude: quatNormalize(quatMultiply(correction, state.attitude)),
+    attitude: quatNormalize(quatMultiply(correction, attitude)),
     baselineMagnitudeUt,
     baselineInclinationDeg,
     magneticDisturbed: disturbed,

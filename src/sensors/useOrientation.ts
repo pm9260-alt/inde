@@ -40,11 +40,13 @@ export interface UseOrientationResult {
  * @param declinationDeg   磁北から真北へのずれ（度・東が正）。不明なら 0。
  * @param manualOffsetDeg  利用者が手で加える補正（度・東が正）
  * @param enabled          画面が前面にあるあいだだけ true にする
+ * @param headingFree      方位が実際の方角と合っている必要がないか（デモ）
  */
 export const useOrientation = (
   declinationDeg: number,
   manualOffsetDeg: number,
   enabled = true,
+  headingFree = false,
 ): UseOrientationResult => {
   const attitudeRef = useRef<Quat>(QUAT_IDENTITY);
   const [status, setStatus] = useState<OrientationStatus>(INITIAL_STATUS);
@@ -61,6 +63,10 @@ export const useOrientation = (
   useEffect(() => {
     provider.setHeadingCorrection(declinationDeg, manualOffsetDeg);
   }, [provider, declinationDeg, manualOffsetDeg]);
+
+  useEffect(() => {
+    provider.setHeadingFree(headingFree);
+  }, [provider, headingFree]);
 
   useEffect(() => {
     if (!enabled) {

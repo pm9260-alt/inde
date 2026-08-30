@@ -31,6 +31,7 @@ import {
 import {
   angularVelocityFromDeviceMotion,
   attitudeFromGravityAndField,
+  attitudeFromGravityOnly,
   DEFAULT_FUSION_TUNING,
   gravityFromDeviceMotion,
   INITIAL_FUSION_STATE,
@@ -256,14 +257,16 @@ describe('融合フィルタ', () => {
     expect(state.fieldMagnitude).toBe(0);
   });
 
-  it('収束後に磁場が失われても、それまでの姿勢を保持する', () => {
+  it('収束後に磁場が失われても、それまでの姿勢を保つ', () => {
     const truth = attitudeLookingAt(30, 100, 0);
     const { gravity, field } = observationsFor(truth);
     let state = INITIAL_FUSION_STATE;
     for (let i = 0; i < 300; i += 1) state = updateFusion(state, gravity, field);
     const settled = state.attitude!;
     state = updateFusion(state, gravity, vec(0, 0, 0));
-    expect(state.attitude).toBe(settled);
+    // 姿勢は捨てられず、動いてもいない。
+    expect(state.attitude).not.toBeNull();
+    expect(quatAngleBetween(state.attitude!, settled)).toBeLessThan(0.001);
     expect(state.fieldMagnitude).toBe(0);
   });
 });
@@ -322,5 +325,148 @@ describe('観測モデルの妥当性', () => {
     const truth = attitudeLookingAt(33, 147, 20);
     const direction = rotate(truth, vec(0, 0, -1));
     expect(angleBetween(direction, enuFromAltAz(33, 147))).toBeLessThan(1e-6);
+  });
+});
+
+describe('地磁気が使えないときの継続', () => {
+  it('傾きは重力だけで厳密に求まる', () => {
+    const before = attitudeLookingAt(20, 130, 0);
+    const after = attitudeLookingAt(55, 130, 0);
+    const estimated = attitudeFromGravityOnly(observationsFor(after).gravity, before);
+    expect(estimated).not.toBeNull();
+    expect(altitudeOf(rotate(estimated!, vec(0, 0, -1)))).toBeCloseTo(55, 3);
+  });
+
+  it('姿勢が少しずつ変わるあいだは方位も引き継がれる', () => {
+    // 実際のセンサーは毎秒 60 回来るので、1 回あたりの変化はごく小さい。
+    // その範囲では、引き継ぎの近似誤差は現れない。
+    let attitude = attitudeLookingAt(20, 130, 0);
+    for (let alt = 20.5; alt <= 55; alt += 0.5) {
+      const next = attitudeFromGravityOnly(
+        observationsFor(attitudeLookingAt(alt, 130, 0)).gravity,
+        attitude,
+      );
+      expect(next).not.toBeNull();
+      attitude = next!;
+    }
+    const direction = rotate(attitude, vec(0, 0, -1));
+    expect(altitudeOf(direction)).toBeCloseTo(55, 3);
+    // 35° 持ち上げるあいだに積もる方位のずれは 0.2° 未満。
+    // 表示誤差の目標 0.3° に対しても、地磁気の誤差 3〜10° に対しても十分小さい。
+    expect(Math.abs(azimuthOf(direction) - 130)).toBeLessThan(0.2);
+  });
+
+  it('前の姿勢が無くても傾きは正しく、方位だけが任意になる', () => {
+    const truth = attitudeLookingAt(40, 77, 0);
+    const estimated = attitudeFromGravityOnly(observationsFor(truth).gravity, null);
+    expect(estimated).not.toBeNull();
+    expect(altitudeOf(rotate(estimated!, vec(0, 0, -1)))).toBeCloseTo(40, 3);
+  });
+
+  it('重力がゼロなら作れない', () => {
+    expect(attitudeFromGravityOnly(vec(0, 0, 0), null)).toBeNull();
+  });
+
+  it('磁場が失われたあとも、傾きを追いながら方位を保つ', () => {
+    const observations = observationsFor(attitudeLookingAt(15, 200, 0));
+    let state = INITIAL_FUSION_STATE;
+    for (let i = 0; i < 300; i += 1) {
+      state = updateFusion(state, observations.gravity, observations.field);
+    }
+    const settledAzimuth = azimuthOf(rotate(state.attitude!, vec(0, 0, -1)));
+
+    // 磁場が失われたまま、15° → 60° へゆっくり持ち上げる（実際の動きの速さ）。
+    for (let alt = 15; alt <= 60; alt += 0.5) {
+      const moved = observationsFor(attitudeLookingAt(alt, 200, 0));
+      state = updateFusion(state, moved.gravity, vec(0, 0, 0));
+    }
+    // 補正は 1 回あたり一部しか進まないので、追いつくまで少し余分に回す。
+    const settled = observationsFor(attitudeLookingAt(60, 200, 0));
+    for (let i = 0; i < 40; i += 1) {
+      state = updateFusion(state, settled.gravity, vec(0, 0, 0));
+    }
+
+    const direction = rotate(state.attitude!, vec(0, 0, -1));
+    expect(altitudeOf(direction)).toBeCloseTo(60, 1);
+    // 方位は磁場が無くても保たれている。
+    expect(Math.abs(azimuthOf(direction) - settledAzimuth)).toBeLessThan(0.5);
+  });
+
+  it('本番では、地磁気が無いまま姿勢を作り始めない', () => {
+    const truth = attitudeLookingAt(35, 90, 0);
+    const state = updateFusion(
+      INITIAL_FUSION_STATE,
+      observationsFor(truth).gravity,
+      vec(0, 0, 0),
+    );
+    expect(state.attitude).toBeNull();
+  });
+
+  it('デモでは、地磁気が無くても姿勢を作り始める', () => {
+    const truth = attitudeLookingAt(35, 90, 0);
+    const state = updateFusion(
+      INITIAL_FUSION_STATE,
+      observationsFor(truth).gravity,
+      vec(0, 0, 0),
+      DEFAULT_FUSION_TUNING,
+      { allowHeadingFreeStart: true },
+    );
+    expect(state.attitude).not.toBeNull();
+    // 傾きは正しい。方位は任意でよい。
+    expect(altitudeOf(rotate(state.attitude!, vec(0, 0, -1)))).toBeCloseTo(35, 2);
+  });
+});
+
+describe('方位を問わない状態（デモ）', () => {
+  const freeTuning = { ...DEFAULT_FUSION_TUNING, headingCorrection: 0 };
+
+  it('地磁気が使えるようになっても方位が引き寄せられない', () => {
+    // 屋内では地磁気が遅れて使えるようになることがある。そのとき方位が
+    // 磁北へ吸われると、置いた星座がずれていく。
+    const truth = attitudeLookingAt(35, 90, 0);
+    const { gravity, field } = observationsFor(truth);
+
+    // まず磁場なしで立ち上げる。
+    let state = updateFusion(INITIAL_FUSION_STATE, gravity, vec(0, 0, 0), freeTuning, {
+      allowHeadingFreeStart: true,
+    });
+    const startAzimuth = azimuthOf(rotate(state.attitude!, vec(0, 0, -1)));
+
+    // 途中から磁場が来ても、方位は動かない。
+    for (let i = 0; i < 300; i += 1) {
+      state = updateFusion(state, gravity, field, freeTuning, { allowHeadingFreeStart: true });
+    }
+    const endAzimuth = azimuthOf(rotate(state.attitude!, vec(0, 0, -1)));
+    expect(Math.abs(endAzimuth - startAzimuth)).toBeLessThan(0.5);
+  });
+
+  it('方位を止めても傾きは追従する', () => {
+    let state = updateFusion(
+      INITIAL_FUSION_STATE,
+      observationsFor(attitudeLookingAt(10, 90, 0)).gravity,
+      vec(0, 0, 0),
+      freeTuning,
+      { allowHeadingFreeStart: true },
+    );
+    const moved = observationsFor(attitudeLookingAt(65, 90, 0));
+    for (let i = 0; i < 60; i += 1) {
+      state = updateFusion(state, moved.gravity, moved.field, freeTuning, {
+        allowHeadingFreeStart: true,
+      });
+    }
+    expect(altitudeOf(rotate(state.attitude!, vec(0, 0, -1)))).toBeCloseTo(65, 1);
+  });
+
+  it('本番の設定では方位が磁北へ収束する', () => {
+    // 上の挙動が、デモ専用の設定によるものだと示しておく。
+    const truth = attitudeLookingAt(35, 90, 0);
+    const { gravity, field } = observationsFor(truth);
+    let state = updateFusion(INITIAL_FUSION_STATE, gravity, vec(0, 0, 0), DEFAULT_FUSION_TUNING, {
+      allowHeadingFreeStart: true,
+    });
+    for (let i = 0; i < 600; i += 1) {
+      state = updateFusion(state, gravity, field);
+    }
+    expect(quatAngleBetween(state.attitude!, truth)).toBeLessThan(0.5);
   });
 });

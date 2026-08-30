@@ -13,6 +13,7 @@ import { DeviceMotion, Magnetometer } from 'expo-sensors';
 import { applyHeadingOffset, vec, type Vec3 } from '../astro/math';
 import {
   angularVelocityFromDeviceMotion,
+  DEFAULT_FUSION_TUNING,
   gravityFromDeviceMotion,
   INITIAL_FUSION_STATE,
   propagateByAngularVelocity,
@@ -39,6 +40,7 @@ export class FusionOrientationProvider implements OrientationProvider {
   private field: Vec3 | null = null;
   private lastTimestamp: number | null = null;
   private headingOffset = 0;
+  private headingFree = false;
 
   async isAvailable(): Promise<boolean> {
     const [motion, magnetometer] = await Promise.all([
@@ -51,6 +53,24 @@ export class FusionOrientationProvider implements OrientationProvider {
   /** 自前の TRIAD は磁北基準なので、偏角も手動補正も両方足す。 */
   setHeadingCorrection(declinationDeg: number, manualDeg: number): void {
     this.headingOffset = declinationDeg + manualDeg;
+  }
+
+  setHeadingFree(enabled: boolean): void {
+    this.headingFree = enabled;
+  }
+
+  /**
+   * 方位を問わない状態では、地磁気による方位補正を止める。
+   *
+   * 止めないと、屋内で地磁気が遅れて使えるようになった瞬間に、方位が
+   * 磁北へ引き寄せられて空全体が回ってしまう。デモは端末を向けた先に
+   * 星座を置いているので、その基準が動くと置いたものがずれていく。
+   * 傾きは重力から、方位はジャイロだけから取るのが正しい。
+   */
+  private get tuning() {
+    return this.headingFree
+      ? { ...DEFAULT_FUSION_TUNING, headingCorrection: 0 }
+      : DEFAULT_FUSION_TUNING;
   }
 
   async start(listener: OrientationListener): Promise<() => void> {
@@ -88,9 +108,15 @@ export class FusionOrientationProvider implements OrientationProvider {
       }
       this.lastTimestamp = timestamp;
 
-      if (this.field) {
-        this.state = updateFusion(this.state, gravity, this.field);
-      }
+      this.state = updateFusion(
+        this.state,
+        gravity,
+        // 磁場がまだ来ていないあいだはゼロとして扱う。方位を問わない状態
+        // （デモ）なら、それでも傾きだけで姿勢が立ち上がる。
+        this.field ?? vec(0, 0, 0),
+        this.tuning,
+        { allowHeadingFreeStart: this.headingFree },
+      );
 
       const attitude = this.state.attitude;
       if (!attitude) return;

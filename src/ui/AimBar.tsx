@@ -8,7 +8,7 @@ import { useEffect, useRef } from 'react';
 import { Animated, Easing, Pressable, StyleSheet, View } from 'react-native';
 
 import type { Asterism } from '../data/constellations';
-import { color, duration, gutter, space, stroke } from '../design/tokens';
+import { color, duration, gutter, space, staging, stroke } from '../design/tokens';
 import { Type } from './Type';
 
 interface Props {
@@ -26,15 +26,17 @@ export const AimBar = ({ asterism, onOpen }: Props) => {
   useEffect(() => {
     const visible = asterism != null;
     Animated.parallel([
+      // 現れるときは演出の時計に合わせてゆっくり。消えるときは速く。
+      // 出るときの間は見せるためのもの、消えるときの間は邪魔でしかない。
       Animated.timing(fade, {
         toValue: visible ? 1 : 0,
-        duration: visible ? duration.quick : duration.instant,
+        duration: visible ? staging.labelFade : duration.quick,
         easing: Easing.out(Easing.quad),
         useNativeDriver: true,
       }),
       Animated.timing(rise, {
         toValue: visible ? 0 : 8,
-        duration: duration.quick,
+        duration: visible ? staging.labelFade : duration.quick,
         easing: Easing.out(Easing.cubic),
         useNativeDriver: true,
       }),

@@ -14,6 +14,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { altitudeOf, azimuthOf } from '../src/astro/math';
 import { makeProjection, viewingDirection } from '../src/astro/projection';
 import { SKY_ENVIRONMENTS, type SkyEnvironment } from '../src/astro/visibility';
+import { DEMO_MODE_AVAILABLE } from '../src/config/featureFlags';
 import { color, gutter, hitSlop, radius, space, stroke } from '../src/design/tokens';
 import { useObserver, useClock } from '../src/sensors/useObserver';
 import { useOrientation } from '../src/sensors/useOrientation';
@@ -39,12 +40,13 @@ export default function TuneScreen() {
     settings.headingOffsetDeg,
     true,
   );
-  const model = useSkyModel(
-    observerState.observer,
-    now,
-    settings.environment,
-    settings.onlyVisibleStars,
-  );
+  const model = useSkyModel({
+    kind: 'live',
+    observer: observerState.observer,
+    time: now,
+    environment: settings.environment,
+    onlyVisibleStars: settings.onlyVisibleStars,
+  });
 
   const [aim, setAim] = useState({ azimuth: 0, altitude: 0 });
   useEffect(() => {
@@ -110,6 +112,28 @@ export default function TuneScreen() {
             muted
           />
         </Section>
+
+        {DEMO_MODE_AVAILABLE ? (
+          <Section title="デモ">
+            <Pressable
+              onPress={() => update({ demoMode: !settings.demoMode })}
+              style={styles.toggle}
+              accessibilityRole="switch"
+              accessibilityState={{ checked: settings.demoMode }}
+            >
+              <View style={styles.toggleLabels}>
+                <Type variant="body">デモ表示</Type>
+                <Type variant="caption" tone="tertiary" style={styles.note}>
+                  季節も時刻も現在地も無視して、端末を空へ向けるとオリオン座が
+                  現れます。昼でも屋内でも動きます。実際の夜空ではありません。
+                </Type>
+              </View>
+              <Type variant="body" tone={settings.demoMode ? 'ember' : 'tertiary'}>
+                {settings.demoMode ? '入' : '切'}
+              </Type>
+            </Pressable>
+          </Section>
+        ) : null}
 
         <Section title="空の明るさ">
           <View style={styles.choices}>
