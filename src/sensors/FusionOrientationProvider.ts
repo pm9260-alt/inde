@@ -1,0 +1,118 @@
+/**
+ * expo-sensors だけで姿勢を作る実装。Expo Go で動く。
+ *
+ * DeviceMotion からは重力と角速度を、Magnetometer からは較正済みの磁場を
+ * 受け取る。DeviceMotion のほうが速いので、そちらが来るたびに
+ *   1. 角速度で姿勢を進める（予測）
+ *   2. 重力と直近の磁場で観測へ寄せる（補正）
+ * という順で更新する。速い動きはジャイロが、絶対的な向きは重力と磁場が
+ * 受け持つ。
+ */
+import { DeviceMotion, Magnetometer } from 'expo-sensors';
+
+import { applyHeadingOffset, vec, type Vec3 } from '../astro/math';
+import {
+  angularVelocityFromDeviceMotion,
+  gravityFromDeviceMotion,
+  INITIAL_FUSION_STATE,
+  propagateByAngularVelocity,
+  updateFusion,
+  type FusionState,
+} from './attitude';
+import type {
+  OrientationAccuracy,
+  OrientationListener,
+  OrientationProvider,
+} from './orientationProvider';
+
+/** 重力と角速度の取得間隔（ミリ秒）。画面の更新に合わせて 60Hz。 */
+const DEVICE_MOTION_INTERVAL_MS = 16;
+/** 磁場の取得間隔。方位はゆっくり補正するので半分でよい。 */
+const MAGNETOMETER_INTERVAL_MS = 33;
+/** これ以上間隔が空いたサンプルは、角速度による予測を打ち切る。 */
+const MAX_PROPAGATION_SECONDS = 0.2;
+
+export class FusionOrientationProvider implements OrientationProvider {
+  readonly id = 'fusion' as const;
+
+  private state: FusionState = INITIAL_FUSION_STATE;
+  private field: Vec3 | null = null;
+  private lastTimestamp: number | null = null;
+  private headingOffset = 0;
+
+  async isAvailable(): Promise<boolean> {
+    const [motion, magnetometer] = await Promise.all([
+      DeviceMotion.isAvailableAsync(),
+      Magnetometer.isAvailableAsync(),
+    ]);
+    return motion && magnetometer;
+  }
+
+  setHeadingOffset(degrees: number): void {
+    this.headingOffset = degrees;
+  }
+
+  async start(listener: OrientationListener): Promise<() => void> {
+    this.state = INITIAL_FUSION_STATE;
+    this.field = null;
+    this.lastTimestamp = null;
+
+    DeviceMotion.setUpdateInterval(DEVICE_MOTION_INTERVAL_MS);
+    Magnetometer.setUpdateInterval(MAGNETOMETER_INTERVAL_MS);
+
+    const magnetometerSubscription = Magnetometer.addListener(({ x, y, z }) => {
+      this.field = vec(x, y, z);
+    });
+
+    const motionSubscription = DeviceMotion.addListener((event) => {
+      const gravity = gravityFromDeviceMotion(
+        event.acceleration,
+        event.accelerationIncludingGravity,
+      );
+
+      // 角速度で姿勢を進めてから観測で補正する。
+      const timestamp = event.rotation?.timestamp ?? null;
+      if (this.state.attitude && timestamp != null && this.lastTimestamp != null) {
+        const dt = timestamp - this.lastTimestamp;
+        if (dt > 0 && dt < MAX_PROPAGATION_SECONDS) {
+          this.state = {
+            ...this.state,
+            attitude: propagateByAngularVelocity(
+              this.state.attitude,
+              angularVelocityFromDeviceMotion(event.rotationRate),
+              dt,
+            ),
+          };
+        }
+      }
+      this.lastTimestamp = timestamp;
+
+      if (this.field) {
+        this.state = updateFusion(this.state, gravity, this.field);
+      }
+
+      const attitude = this.state.attitude;
+      if (!attitude) return;
+      listener({
+        attitude: applyHeadingOffset(attitude, this.headingOffset),
+        accuracy: this.accuracyOf(),
+        fieldMagnitude: this.state.fieldMagnitude,
+      });
+    });
+
+    return () => {
+      motionSubscription.remove();
+      magnetometerSubscription.remove();
+      DeviceMotion.removeAllListeners();
+      Magnetometer.removeAllListeners();
+    };
+  }
+
+  private accuracyOf(): OrientationAccuracy {
+    if (!this.state.attitude) return 'unavailable';
+    // CoreMotion は磁気センサーが未較正のあいだ、磁場としてゼロを返す。
+    if (this.state.fieldMagnitude < 5) return 'uncalibrated';
+    if (this.state.magneticDisturbed) return 'disturbed';
+    return 'ok';
+  }
+}
