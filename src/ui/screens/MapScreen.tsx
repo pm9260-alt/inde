@@ -8,7 +8,11 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { GAME_RULES, LOCATION_RULES } from '@/config/gameConfig'
 import { IS_DEMO } from '@/config/env'
 import { hasGoogleMapsKey } from '@/services/mapsKey'
-import { loadGoogleMaps } from '@/services/googleMaps'
+import {
+  loadGoogleMaps,
+  mapsAuthFailureHint,
+  onMapsAuthFailure,
+} from '@/services/googleMaps'
 import { startDemoLocation, useRealLocation, walkTo } from '@/demo/demoWalk'
 import { evaluateCaptureEligibility } from '@/domain/capture'
 import { distanceMeters, formatDistance, type LatLng } from '@/domain/geo'
@@ -94,8 +98,17 @@ export function MapScreen({ geo }: { geo: GeoState }) {
         setMapsError(error instanceof Error ? error.message : '読み込めませんでした')
         setMapsStatus('failed')
       })
+    // 読み込めても、キーが断られることがある（制限・未有効化・請求先未設定など）。
+    // そのときは Google の英語のエラー画面を出したままにせず、簡易マップへ戻す。
+    const unsubscribe = onMapsAuthFailure(() => {
+      if (cancelled) return
+      setMapsError(mapsAuthFailureHint())
+      setMapsStatus('failed')
+    })
+
     return () => {
       cancelled = true
+      unsubscribe()
     }
   }, [hasKey])
 
@@ -240,7 +253,7 @@ export function MapScreen({ geo }: { geo: GeoState }) {
       {mapsStatus === 'failed' && (
         <div className="notice notice--warn">
           <span className="notice__text">
-            <span className="notice__main">Google マップを表示できませんでした</span>
+            <span className="notice__main">Google マップのキーが使えませんでした</span>
             <span className="notice__sub">
               {mapsError || 'プロフィール画面でキーを確認してください'}
             </span>

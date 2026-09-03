@@ -221,14 +221,19 @@ async function main() {
       ),
     )
 
-    await page.locator('.notice--warn').first().waitFor({ timeout: 20_000 })
-    const keyErrorNotice = await page.locator('.notice--warn').allInnerTexts()
+    // Google がキーを断ったときの動き（window.gm_authFailure が呼ばれる状況）を再現する
+    await page.evaluate(() => {
+      const handler = window.gm_authFailure
+      if (typeof handler === 'function') handler()
+    })
+    await page.waitForTimeout(500)
+    const authNotice = await page.locator('.notice--warn').allInnerTexts()
     check(
-      '使えないキーでも落ちずに案内へ切り替わる',
-      keyErrorNotice.some((text) => text.includes('Google マップを表示できませんでした')),
-      keyErrorNotice.join(' / ').replace(/\n/g, ' '),
+      'キーを断られたら日本語で理由を出す',
+      authNotice.some((text) => text.includes('キーが使えませんでした')),
+      authNotice.join(' / ').replace(/\n/g, ' '),
     )
-    check('そのあとも簡易マップで遊べる', (await page.locator('.marker').count()) > 3)
+    check('断られても簡易マップで遊べる', (await page.locator('.marker').count()) > 3)
 
     await page.getByRole('button', { name: 'プロフィール' }).click()
     await page.waitForSelector('.namerow')

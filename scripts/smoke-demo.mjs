@@ -79,6 +79,30 @@ await page.getByRole('button', { name: '図鑑' }).click()
 await page.waitForSelector('.dexgrid')
 check('図鑑に反映される', (await page.locator('.page-head__sub').innerText()).startsWith('5 / '))
 
+// ファイルを直接開いた状態で、キーが断られたときの案内を確かめる
+await page.getByRole('button', { name: 'プロフィール' }).click()
+await page.waitForSelector('.namerow')
+check('地図の設定が入っている', (await page.getByLabel('Google マップのキー').count()) === 1)
+
+await page.getByLabel('Google マップのキー').fill('AIzaSyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7')
+await page.getByRole('button', { name: '保存' }).nth(1).click()
+await page.waitForTimeout(1800)
+await page.getByRole('button', { name: 'マップ', exact: true }).click()
+await page.waitForTimeout(1200)
+await page.evaluate(() => {
+  const handler = window.gm_authFailure
+  if (typeof handler === 'function') handler()
+})
+await page.waitForTimeout(500)
+const fileNotice = (await page.locator('.notice--warn').allInnerTexts()).join(' ').replace(/\n/g, ' ')
+check(
+  'ファイルを直接開いた場合の理由を示す',
+  fileNotice.includes('ファイルを直接開いている'),
+  fileNotice,
+)
+check('その状態でも簡易マップで遊べる', (await page.locator('.marker').count()) > 3)
+await page.screenshot({ path: 'e2e-screenshots/demo-key-error.png' })
+
 await page.screenshot({ path: 'e2e-screenshots/demo-01.png' })
 check('JavaScript のエラーが出ていない', errors.length === 0, errors.slice(0, 2).join(' | '))
 
