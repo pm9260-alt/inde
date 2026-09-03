@@ -7,3 +7,6 @@ dist/
 test-results/
 e2e-screenshots/
 dist-demo/
+
+# お試し版のビルド結果（npm run build:demo で作り直せる）
+demo/
