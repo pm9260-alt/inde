@@ -6,7 +6,9 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { GAME_RULES, LOCATION_RULES } from '@/config/gameConfig'
-import { IS_DEMO, hasGoogleMaps } from '@/config/env'
+import { IS_DEMO } from '@/config/env'
+import { hasGoogleMapsKey } from '@/services/mapsKey'
+import { loadGoogleMaps } from '@/services/googleMaps'
 import { startDemoLocation, useRealLocation, walkTo } from '@/demo/demoWalk'
 import { evaluateCaptureEligibility } from '@/domain/capture'
 import { distanceMeters, formatDistance, type LatLng } from '@/domain/geo'
@@ -52,7 +54,11 @@ export function MapScreen({ geo }: { geo: GeoState }) {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [following, setFollowing] = useState(true)
   const [mapCenter, setMapCenter] = useState<LatLng>(center)
-  const [mapsFailed, setMapsFailed] = useState(false)
+  const hasKey = hasGoogleMapsKey()
+  const [mapsStatus, setMapsStatus] = useState<'none' | 'loading' | 'ready' | 'failed'>(
+    hasKey ? 'loading' : 'none',
+  )
+  const [mapsError, setMapsError] = useState('')
   const [toast, setToast] = useState('')
   const [walking, setWalking] = useState(false)
   const [demoRealGps, setDemoRealGps] = useState(false)
@@ -71,6 +77,27 @@ export function MapScreen({ geo }: { geo: GeoState }) {
     lastCenterRef.current = key
     setMapCenter(center)
   }, [center.lat, center.lng, following])
+
+  useEffect(() => {
+    if (!hasKey) {
+      setMapsStatus('none')
+      return
+    }
+    let cancelled = false
+    setMapsStatus('loading')
+    loadGoogleMaps()
+      .then(() => {
+        if (!cancelled) setMapsStatus('ready')
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return
+        setMapsError(error instanceof Error ? error.message : '読み込めませんでした')
+        setMapsStatus('failed')
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [hasKey])
 
   useEffect(() => {
     if (!toast) return
@@ -137,7 +164,9 @@ export function MapScreen({ geo }: { geo: GeoState }) {
     return markers
   }, [nearby, selectedId, fix])
 
-  const useGoogle = hasGoogleMaps() && !mapsFailed
+  // Google マップの読み込みが終わるまでは簡易マップで遊べるようにしておく。
+  // キーが違うときや通信が遅いときに、真っ白な画面で待たせないため。
+  const useGoogle = mapsStatus === 'ready'
   const nearestUncaptured = nearby.find((entry) => !entry.captured)
 
   const handleWalk = () => {
@@ -200,7 +229,25 @@ export function MapScreen({ geo }: { geo: GeoState }) {
       )}
 
       <LocationNotice geo={geo} />
-      {!useGoogle && !IS_DEMO && (
+      {mapsStatus === 'loading' && (
+        <div className="notice">
+          <span className="notice__text">
+            <span className="notice__main">Google マップを読み込んでいます</span>
+            <span className="notice__sub">読み込むまでは簡易マップで遊べます</span>
+          </span>
+        </div>
+      )}
+      {mapsStatus === 'failed' && (
+        <div className="notice notice--warn">
+          <span className="notice__text">
+            <span className="notice__main">Google マップを表示できませんでした</span>
+            <span className="notice__sub">
+              {mapsError || 'プロフィール画面でキーを確認してください'}
+            </span>
+          </span>
+        </div>
+      )}
+      {mapsStatus === 'none' && !IS_DEMO && (
         <div className="notice">
           <span className="notice__text">
             <span className="notice__main">簡易マップで表示しています</span>
@@ -215,7 +262,10 @@ export function MapScreen({ geo }: { geo: GeoState }) {
             zoom={15}
             items={items}
             onUserInteract={() => setFollowing(false)}
-            onError={() => setMapsFailed(true)}
+            onError={(message) => {
+              setMapsError(message)
+              setMapsStatus('failed')
+            }}
           />
         ) : (
           <SimpleMapCanvas

@@ -190,6 +190,57 @@ async function main() {
     await page.screenshot({ path: `${SHOTS}/08-dex.png` })
     await closeSheet(page)
 
+    /* 7-2. 地図の設定（キーの保存と解除） ------------------------ */
+    await page.getByRole('button', { name: 'プロフィール' }).click()
+    await page.waitForSelector('.namerow')
+    const mapRow = page.locator('.metarow', { hasText: 'いまの地図' })
+    check('地図の設定が出る', (await mapRow.innerText()).includes('簡易マップ'))
+
+    const SAMPLE_KEY = 'AIzaSyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7'
+    await page.getByLabel('Google マップのキー').fill('みじかすぎるキー')
+    await page.getByRole('button', { name: '保存' }).nth(1).click()
+    check('形の違うキーは弾いて案内する', (await page.locator('.footnote').first().innerText()).includes('形が違う'))
+
+    await page.getByLabel('Google マップのキー').fill(SAMPLE_KEY)
+    await page.getByRole('button', { name: '保存' }).nth(1).click()
+    await page.waitForTimeout(1600)
+    await page.getByRole('button', { name: 'プロフィール' }).click()
+    await page.waitForSelector('.namerow')
+    check(
+      'キーを保存すると Google マップに切り替わる',
+      (await page.locator('.metarow', { hasText: 'いまの地図' }).innerText()).includes('Google マップ'),
+    )
+
+    await page.getByRole('button', { name: 'マップ', exact: true }).click()
+    await page.waitForTimeout(1500)
+    check('読み込み中もすぐ遊べる（真っ白にならない）', (await page.locator('.marker').count()) > 3)
+    check(
+      '読み込み中だと分かる案内が出る',
+      (await page.locator('.notice__main').allInnerTexts()).some((text) =>
+        text.includes('読み込んでいます'),
+      ),
+    )
+
+    await page.locator('.notice--warn').first().waitFor({ timeout: 20_000 })
+    const keyErrorNotice = await page.locator('.notice--warn').allInnerTexts()
+    check(
+      '使えないキーでも落ちずに案内へ切り替わる',
+      keyErrorNotice.some((text) => text.includes('Google マップを表示できませんでした')),
+      keyErrorNotice.join(' / ').replace(/\n/g, ' '),
+    )
+    check('そのあとも簡易マップで遊べる', (await page.locator('.marker').count()) > 3)
+
+    await page.getByRole('button', { name: 'プロフィール' }).click()
+    await page.waitForSelector('.namerow')
+    await page.getByRole('button', { name: 'キーを削除して簡易マップに戻す' }).click()
+    await page.waitForTimeout(1600)
+    await page.getByRole('button', { name: 'プロフィール' }).click()
+    await page.waitForSelector('.namerow')
+    check(
+      'キーを削除すると簡易マップに戻る',
+      (await page.locator('.metarow', { hasText: 'いまの地図' }).innerText()).includes('簡易マップ'),
+    )
+
     /* 8. プロフィールへ反映 ------------------------------------- */
     await page.getByRole('button', { name: 'プロフィール' }).click()
     await page.waitForSelector('.namerow')

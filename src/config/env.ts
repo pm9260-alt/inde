@@ -31,6 +31,7 @@ export const ENV = {
  */
 export const IS_DEMO: boolean = import.meta.env.VITE_DEMO_MODE === 'on'
 
-export const hasGoogleMaps = (): boolean => ENV.googleMapsApiKey.length > 0
+/** .env にキーが書かれているか。画面から入れたキーは services/mapsKey.ts が扱う。 */
+export const hasEnvGoogleMapsKey = (): boolean => ENV.googleMapsApiKey.length > 0
 export const hasSharedRanking = (): boolean =>
   ENV.firebaseProjectId.length > 0 && ENV.firebaseApiKey.length > 0
