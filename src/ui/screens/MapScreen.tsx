@@ -14,17 +14,18 @@ import {
   onMapsAuthFailure,
 } from '@/services/googleMaps'
 import { startDemoLocation, useRealLocation, walkTo } from '@/demo/demoWalk'
+import type { BoardChance } from '@/domain/board'
 import { evaluateCaptureEligibility } from '@/domain/capture'
-import { distanceMeters, formatDistance, type LatLng } from '@/domain/geo'
-import type { PlaceCard } from '@/domain/types'
+import { distanceMeters, formatDistance, zoomToFit, type LatLng } from '@/domain/geo'
+import type { HandHint, PlaceCard } from '@/domain/types'
 import { geolocation, type GeoState } from '@/services/geolocation'
 import { tapFeedback } from '@/services/haptics'
 import { useGameStore } from '@/state/gameStore'
 import {
+  useBoardCards,
   useHand,
   useHandHints,
   useInterimScore,
-  useNearbyCards,
   useRemainingSeconds,
 } from '@/ui/hooks/useGameDerived'
 import { CardMarker } from '@/ui/components/CardMarker'
@@ -38,7 +39,12 @@ import type { MapItem } from '@/ui/components/mapTypes'
 /** 現在地が取れないときの初期表示位置（東京駅） */
 const DEFAULT_CENTER: LatLng = { lat: 35.6812, lng: 139.7671 }
 
-export function MapScreen({ geo }: { geo: GeoState }) {
+interface MapScreenProps {
+  geo: GeoState
+  chances: BoardChance[]
+}
+
+export function MapScreen({ geo, chances }: MapScreenProps) {
   const phase = useGameStore((state) => state.phase)
   const session = useGameStore((state) => state.session)
   const dex = useGameStore((state) => state.dex)
@@ -53,7 +59,7 @@ export function MapScreen({ geo }: { geo: GeoState }) {
 
   const fix = geo.fix
   const center = fix?.coords ?? DEFAULT_CENTER
-  const nearby = useNearbyCards(fix?.coords ?? null)
+  const nearby = useBoardCards(fix?.coords ?? null)
 
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [following, setFollowing] = useState(true)
@@ -65,6 +71,7 @@ export function MapScreen({ geo }: { geo: GeoState }) {
   const [mapsError, setMapsError] = useState('')
   const [toast, setToast] = useState('')
   const [walking, setWalking] = useState(false)
+  const [showHands, setShowHands] = useState(false)
   const [demoRealGps, setDemoRealGps] = useState(false)
   const lastCenterRef = useRef<string>('')
 
@@ -140,8 +147,20 @@ export function MapScreen({ geo }: { geo: GeoState }) {
     playing: phase === 'playing',
   })
 
+  // 開始前は盤面の全体が見えるようにする。作戦を考えられないと意味がないため。
+  const zoom = useMemo(() => {
+    const points = nearby.map((entry) => ({ lat: entry.card.lat, lng: entry.card.lng }))
+    if (fix) points.push(fix.coords)
+    const width = typeof window === 'undefined' ? 390 : window.innerWidth
+    const height = typeof window === 'undefined' ? 700 : window.innerHeight * 0.7
+    return zoomToFit(points, width, height, { min: 12, max: 15.5 })
+  }, [nearby, fix?.coords.lat, fix?.coords.lng])
+
+  // 広い範囲を映すときはラベルを小さくして、マーカー同士の重なりを減らす
+  const compactMarkers = zoom < 14.6
+
   const items: MapItem[] = useMemo(() => {
-    const markers: MapItem[] = nearby.map((entry) => {
+    const markers: MapItem[] = nearby.map((entry, index) => {
       const inRange =
         entry.distance !== null &&
         entry.distance - Math.min(fix?.accuracy ?? 0, LOCATION_RULES.accuracyAllowanceMaxMeters) <=
@@ -150,13 +169,23 @@ export function MapScreen({ geo }: { geo: GeoState }) {
         key: entry.card.id,
         lat: entry.card.lat,
         lng: entry.card.lng,
-        zIndex: entry.card.id === selectedId ? 30 : inRange && !entry.captured ? 12 : 10,
+        ward: entry.card.municipality,
+        zIndex: entry.card.id === selectedId
+          ? 30
+          : entry.captured
+            ? // 取得済みは奥へ下げる。まだ取っていないカードのタップを邪魔しない。
+              4
+            : inRange
+              ? 20
+              : // 近いカードほど手前。重なっても目的地を押せるようにする。
+                12 - Math.min(7, index),
         node: (
           <CardMarker
             card={entry.card}
             captured={entry.captured}
             inRange={inRange && !entry.captured}
             selected={entry.card.id === selectedId}
+            compact={compactMarkers}
             onSelect={(cardId) => {
               tapFeedback(8)
               setSelectedId(cardId)
@@ -175,11 +204,12 @@ export function MapScreen({ geo }: { geo: GeoState }) {
       })
     }
     return markers
-  }, [nearby, selectedId, fix])
+  }, [nearby, selectedId, fix, compactMarkers])
 
   // Google マップの読み込みが終わるまでは簡易マップで遊べるようにしておく。
   // キーが違うときや通信が遅いときに、真っ白な画面で待たせないため。
   const useGoogle = mapsStatus === 'ready'
+
   const nearestUncaptured = nearby.find((entry) => !entry.captured)
 
   const handleWalk = () => {
@@ -208,6 +238,7 @@ export function MapScreen({ geo }: { geo: GeoState }) {
           capturedCount={hand.length}
           score={interimScore}
           hints={hints}
+          onOpenHands={() => setShowHands(true)}
         />
       )}
 
@@ -272,7 +303,7 @@ export function MapScreen({ geo }: { geo: GeoState }) {
         {useGoogle ? (
           <GoogleMapCanvas
             center={mapCenter}
-            zoom={15}
+            zoom={zoom}
             items={items}
             onUserInteract={() => setFollowing(false)}
             onError={(message) => {
@@ -283,7 +314,7 @@ export function MapScreen({ geo }: { geo: GeoState }) {
         ) : (
           <SimpleMapCanvas
             center={mapCenter}
-            zoom={15}
+            zoom={zoom}
             items={items}
             onUserInteract={() => setFollowing(false)}
           />
@@ -311,9 +342,11 @@ export function MapScreen({ geo }: { geo: GeoState }) {
             <p className="startbar__note">
               {!fix
                 ? '現在地が分かるとチャレンジを始められます'
-                : nearestUncaptured && nearestUncaptured.distance !== null
-                  ? `いちばん近いカードは ${nearestUncaptured.card.name}（${formatDistance(nearestUncaptured.distance)}）`
-                  : `周辺のカードを見ながら ${GAME_RULES.durationMinutes} 分のルートを考えましょう`}
+                : chances.length > 0
+                  ? `この盤面では ${chances[0]!.name}（×${chances[0]!.multiplier.toFixed(1)}）が狙えます`
+                  : nearestUncaptured && nearestUncaptured.distance !== null
+                    ? `いちばん近いカードは ${nearestUncaptured.card.name}（${formatDistance(nearestUncaptured.distance)}）`
+                    : `周辺のカードを見ながら ${GAME_RULES.durationMinutes} 分のルートを考えましょう`}
             </p>
             <button
               type="button"
@@ -341,6 +374,10 @@ export function MapScreen({ geo }: { geo: GeoState }) {
             onWalk={IS_DEMO && !demoRealGps && phase === 'playing' ? handleWalk : undefined}
             walking={walking}
           />
+        )}
+
+        {showHands && (
+          <HandsSheet chances={chances} hints={hints} onClose={() => setShowHands(false)} />
         )}
 
         {toast && <div className="toast">{toast}</div>}
@@ -401,5 +438,63 @@ function LocationNotice({ geo }: { geo: GeoState }) {
         </button>
       )}
     </div>
+  )
+}
+
+/** ゲーム中に役を確認するためのボトムシート（マップから離れずに見られる） */
+function HandsSheet({
+  chances,
+  hints,
+  onClose,
+}: {
+  chances: BoardChance[]
+  hints: HandHint[]
+  onClose: () => void
+}) {
+  return (
+    <>
+      <div className="sheet-backdrop" onClick={onClose} />
+      <div className="sheet" role="dialog" aria-label="役">
+        <div className="sheet__grip" />
+        <h2 className="sheet__title">役</h2>
+
+        {hints.length > 0 && (
+          <>
+            <p className="section__label" style={{ marginTop: 14 }}>
+              あと少しで成立
+            </p>
+            {hints.map((hint) => (
+              <div className="metarow" key={`${hint.handId}-${hint.text}`}>
+                <span className="metarow__key">{hint.text}</span>
+                <span className="metarow__value num">×{hint.multiplier.toFixed(1)}</span>
+              </div>
+            ))}
+          </>
+        )}
+
+        <p className="section__label" style={{ marginTop: 18 }}>
+          この盤面で狙える役
+        </p>
+        {chances.length === 0 ? (
+          <p className="footnote">この盤面で成立する役は見つかりませんでした</p>
+        ) : (
+          chances.map((chance) => (
+            <div className="metarow" key={chance.handId}>
+              <span className="metarow__key">
+                <b className="handname">{chance.name}</b>
+                <span className="handcond">{chance.note}</span>
+              </span>
+              <span className="metarow__value num">×{chance.multiplier.toFixed(1)}</span>
+            </div>
+          ))
+        )}
+
+        <div className="sheet__action">
+          <button type="button" className="btn btn--quiet btn--block" onClick={onClose}>
+            閉じる
+          </button>
+        </div>
+      </div>
+    </>
   )
 }

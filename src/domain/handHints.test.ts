@@ -28,8 +28,8 @@ describe('役予告', () => {
   })
 
   it('同じ漢字がもう 1 枚でスリーになることを知らせる', () => {
-    const hints = texts(['新宿', '新橋'])
-    expect(hints.some((text) => text.includes('「新」') && text.includes('スリー'))).toBe(true)
+    const hints = texts(['東京', '東銀座'])
+    expect(hints.some((text) => text.includes('「東」') && text.includes('スリー'))).toBe(true)
   })
 
   it('同一区が続いているときに知らせる', () => {

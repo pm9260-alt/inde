@@ -18,12 +18,25 @@ function countCardsWith(cards: readonly PlaceCard[], predicate: (card: PlaceCard
   return cards.filter(predicate).length
 }
 
-export function buildHandHints(cards: readonly PlaceCard[]): HandHint[] {
-  const slotsLeft = GAME_RULES.handSize - cards.length
+export interface HintOptions {
+  /**
+   * 残り何枚で考えるか。
+   * 省略すると手札の残り枠。結果画面の「惜しかった役」では 1 を渡す。
+   */
+  slotsLeft?: number
+  /** 1 枚も取っていない状態でも出すか（既定は出さない） */
+  allowEmptyHand?: boolean
+}
+
+export function buildHandHints(
+  cards: readonly PlaceCard[],
+  options: HintOptions = {},
+): HandHint[] {
+  const slotsLeft = options.slotsLeft ?? GAME_RULES.handSize - cards.length
   if (slotsLeft <= 0) return []
   // 1 枚も取っていない時点では、すべての役が候補になってしまい助けにならない。
   // ルートを考えるのはプレイヤーの仕事なので、最初の 1 枚を取ってから出す。
-  if (cards.length === 0) return []
+  if (cards.length === 0 && !options.allowEmptyHand) return []
 
   const completed = new Set(evaluateHands(cards).map((hand) => hand.id))
   const hints: HandHint[] = []
@@ -133,4 +146,15 @@ export function buildHandHints(cards: readonly PlaceCard[]): HandHint[] {
   return hints
     .sort((a, b) => a.remaining - b.remaining || b.multiplier - a.multiplier)
     .slice(0, HINT_RULES.maxHints)
+}
+
+/**
+ * 「あと 1 枚で成立していた役」。結果画面で次の動機づけに使う。
+ * 成立しなかった役のうち、あと 1 枚で届いていたものを 1 つだけ返す。
+ */
+export function findNearMiss(cards: readonly PlaceCard[]): HandHint | null {
+  const hints = buildHandHints(cards, { slotsLeft: 1 })
+  const closest = hints.filter((hint) => hint.remaining === 1)
+  if (closest.length === 0) return null
+  return closest.reduce((best, hint) => (hint.multiplier > best.multiplier ? hint : best))
 }

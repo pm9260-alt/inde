@@ -31,6 +31,11 @@ export function SimpleMapCanvas({ center, zoom, items, onUserInteract }: MapCanv
     setView((current) => ({ ...current, lat: center.lat, lng: center.lng }))
   }, [center.lat, center.lng])
 
+  // 盤面の広さに応じた拡大率を反映する
+  useEffect(() => {
+    setView((current) => ({ ...current, zoom }))
+  }, [zoom])
+
   useEffect(() => {
     const element = hostRef.current
     if (!element) return
@@ -134,6 +139,9 @@ export function SimpleMapCanvas({ center, zoom, items, onUserInteract }: MapCanv
               <div
                 key={item.key}
                 className="mapcanvas__item"
+                data-lat={item.lat}
+                data-lng={item.lng}
+                data-ward={item.ward}
                 style={{ left: `${point.x}px`, top: `${point.y}px`, zIndex: item.zIndex ?? 1 }}
               >
                 {item.node}

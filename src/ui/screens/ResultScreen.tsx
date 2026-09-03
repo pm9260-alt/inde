@@ -12,10 +12,12 @@ interface Props {
   result: GameResult
   rank: number | null
   rankNotice: string
+  onRetry: () => void
   onClose: () => void
+  canRetry: boolean
 }
 
-export function ResultScreen({ result, rank, rankNotice, onClose }: Props) {
+export function ResultScreen({ result, rank, rankNotice, onRetry, onClose, canRetry }: Props) {
   const { score, cards } = result
   const diff = result.score.finalScore - result.previousBest
   const usedCardIds = new Set(score.bestHand?.cardIds ?? [])
@@ -103,15 +105,36 @@ export function ResultScreen({ result, rank, rankNotice, onClose }: Props) {
         </div>
         <div className="metarow">
           <span className="metarow__key">ランキング順位</span>
-          <span className="metarow__value num">{rank !== null ? `${rank} 位` : '集計中'}</span>
+          <span className="metarow__value num">
+            {rank !== null ? `${rank} 位` : '集計中'}
+            {result.area ? `（${result.area}）` : ''}
+          </span>
         </div>
         {rankNotice && <p className="result__notice">{rankNotice}</p>}
       </div>
 
-      <div className="section">
-        <button type="button" className="btn btn--primary" onClick={onClose}>
+      {result.nearMiss && (
+        <div className="section">
+          <div className="nearmiss">
+            <p className="nearmiss__label">惜しかった役</p>
+            <p className="nearmiss__text">
+              {result.nearMiss.text.replace(/^あと/, 'あと')}でした
+            </p>
+            <p className="nearmiss__mult num">
+              {result.nearMiss.handName} ×{result.nearMiss.multiplier.toFixed(1)}
+            </p>
+          </div>
+        </div>
+      )}
+
+      <div className="section result__actions">
+        <button type="button" className="btn btn--accent" onClick={onRetry} disabled={!canRetry}>
+          もう一度この街で挑戦
+        </button>
+        <button type="button" className="btn btn--ghost btn--block" onClick={onClose}>
           マップへ戻る
         </button>
+        {!canRetry && <p className="footnote">現在地が分かると、すぐに再挑戦できます</p>}
       </div>
     </div>
   )

@@ -8,9 +8,10 @@ interface Props {
   capturedCount: number
   score: ScoreBreakdown
   hints: HandHint[]
+  onOpenHands: () => void
 }
 
-export function GameHud({ remainingSeconds, capturedCount, score, hints }: Props) {
+export function GameHud({ remainingSeconds, capturedCount, score, hints, onOpenHands }: Props) {
   const urgent = remainingSeconds <= 300
 
   return (
@@ -33,18 +34,26 @@ export function GameHud({ remainingSeconds, capturedCount, score, hints }: Props
           <span className="hud__value num">{formatScore(score.finalScore)}</span>
         </div>
       </div>
-      {hints.length > 0 && (
+
+      <div className="hud__bottom">
         <div className="hud__hints">
-          {hints.map((hint) => (
-            <span
-              key={`${hint.handId}-${hint.text}`}
-              className={`hint${hint.remaining === 1 ? ' hint--close' : ''}`}
-            >
-              {hint.text}
-            </span>
-          ))}
+          {hints.length > 0 ? (
+            hints.map((hint) => (
+              <span
+                key={`${hint.handId}-${hint.text}`}
+                className={`hint${hint.remaining === 1 ? ' hint--close' : ''}`}
+              >
+                {hint.text}
+              </span>
+            ))
+          ) : (
+            <span className="hint hint--quiet">1 枚取ると狙える役が出ます</span>
+          )}
         </div>
-      )}
+        <button type="button" className="hud__hands" onClick={onOpenHands}>
+          役
+        </button>
+      </div>
     </div>
   )
 }

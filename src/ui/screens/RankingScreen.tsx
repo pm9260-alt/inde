@@ -11,20 +11,27 @@ import { useGameStore } from '@/state/gameStore'
 
 const PERIODS: RankingPeriod[] = ['today', 'week', 'all']
 
-export function RankingScreen() {
+export function RankingScreen({ onOpenProfile }: { onOpenProfile: () => void }) {
   const profile = useGameStore((state) => state.profile)
   const history = useGameStore((state) => state.history)
+  const deck = useGameStore((state) => state.deck)
+  const dex = useGameStore((state) => state.dex)
+  // 直前に遊んだエリアを既定にする（盤面は終了後に引き直されるため、履歴を優先する）
+  const myArea = history.find((record) => record.area)?.area || deck?.area || ''
   const [period, setPeriod] = useState<RankingPeriod>('today')
+  const [areaOnly, setAreaOnly] = useState(true)
   const [result, setResult] = useState<RankingResult | null>(null)
   const [loading, setLoading] = useState(true)
 
   const selfIds = history.map((record) => record.id)
 
+  const area = areaOnly && myArea ? myArea : undefined
+
   const load = useCallback(
     async (target: RankingPeriod) => {
       setLoading(true)
       try {
-        setResult(await fetchRanking(target, selfIds, profile.userName))
+        setResult(await fetchRanking(target, selfIds, profile.userName, area ? { area } : {}))
       } catch {
         setResult({
           entries: [],
@@ -36,8 +43,8 @@ export function RankingScreen() {
         setLoading(false)
       }
     },
-    // history の中身が変わったときだけ読み直す
-    [history.length, profile.userName],
+    // history の中身とエリアの切り替えで読み直す
+    [history.length, profile.userName, area],
   )
 
   useEffect(() => {
@@ -53,6 +60,15 @@ export function RankingScreen() {
         )}
       </div>
 
+      <button type="button" className="mecard" onClick={onOpenProfile}>
+        <span className="mecard__name">{profile.userName}</span>
+        <span className="mecard__stats num">
+          最高 {formatScore(profile.bestScore)} ／ {profile.totalPlays} 回 ／ 図鑑{' '}
+          {Object.keys(dex).length}
+        </span>
+        <span className="mecard__go">設定</span>
+      </button>
+
       <div className="segmented" role="tablist">
         {PERIODS.map((value) => (
           <button
@@ -67,6 +83,35 @@ export function RankingScreen() {
           </button>
         ))}
       </div>
+
+      {myArea && (
+        <div className="segmented" role="tablist">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={areaOnly}
+            className="segmented__item"
+            onClick={() => setAreaOnly(true)}
+          >
+            {myArea}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={!areaOnly}
+            className="segmented__item"
+            onClick={() => setAreaOnly(false)}
+          >
+            すべての場所
+          </button>
+        </div>
+      )}
+
+      {areaOnly && myArea && (
+        <p className="footnote areanote">
+          駅の多さで作れる役が変わるため、同じエリアどうしで比べています
+        </p>
+      )}
 
       {result?.notice && (
         <div className="notice">
@@ -91,7 +136,10 @@ export function RankingScreen() {
             <li className={`rankrow${entry.isSelf ? ' rankrow--self' : ''}`} key={entry.id}>
               <span className="rankrow__rank num">{index + 1}</span>
               <span className="rankrow__name">{entry.userName}</span>
-              <span className="rankrow__hand">{entry.bestHandName || '役なし'}</span>
+              <span className="rankrow__hand">
+                {entry.bestHandName || '役なし'}
+                {!areaOnly && entry.area ? `・${entry.area}` : ''}
+              </span>
               <span className="rankrow__score num">{formatScore(entry.score)}</span>
             </li>
           ))}

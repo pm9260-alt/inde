@@ -8,13 +8,7 @@ import { setTimeout as sleep } from 'node:timers/promises'
 
 const PORT = 4174
 const BASE = `http://127.0.0.1:${PORT}`
-const ROUTE = [
-  { name: '東京', lat: 35.6812, lng: 139.7671 },
-  { name: '西荻窪', lat: 35.7039, lng: 139.5994 },
-  { name: '南砂町', lat: 35.6717, lng: 139.8294 },
-  { name: '北品川', lat: 35.6222, lng: 139.7396 },
-  { name: '上野', lat: 35.7141, lng: 139.7774 },
-]
+const START = { lat: 35.6812, lng: 139.7671 }
 
 const checks = []
 const check = (label, ok, detail = '') => {
@@ -60,7 +54,7 @@ try {
     ...devices['iPhone 13'],
     locale: 'ja-JP',
     permissions: ['geolocation'],
-    geolocation: { latitude: ROUTE[0].lat, longitude: ROUTE[0].lng, accuracy: 8 },
+    geolocation: { latitude: START.lat, longitude: START.lng, accuracy: 8 },
   })
   const page = await context.newPage()
   const errors = []
@@ -79,17 +73,37 @@ try {
   await page.getByRole('button', { name: /チャレンジを始める/ }).click()
   await page.waitForSelector('.hud')
 
-  for (const stop of ROUTE) {
+  // 盤面は毎回抽選されるので、いま出ているカードを回る
+  const board = await page.evaluate(() =>
+    [...document.querySelectorAll('.mapcanvas__item[data-lat]')]
+      .map((el) => ({ lat: Number(el.getAttribute('data-lat')), lng: Number(el.getAttribute('data-lng')) }))
+      .filter((entry) => Number.isFinite(entry.lat)),
+  )
+  check('本番ビルドでも盤面が抽選される', board.length >= 5, `${board.length} 枚`)
+
+  let captured = 0
+  for (const stop of board) {
+    if (captured >= 5) break
     await context.setGeolocation({ latitude: stop.lat, longitude: stop.lng, accuracy: 8 })
-    await page.waitForTimeout(500)
-    await page.locator('.marker', { hasText: stop.name }).first().click()
+    await page.waitForTimeout(700)
+    const marker = page.locator(`.mapcanvas__item[data-lat="${stop.lat}"] .marker`).first()
+    if ((await marker.count()) === 0) continue
+    await marker.click()
     await page.waitForSelector('.sheet')
-    await page.locator('.sheet .btn').click()
-    await page.waitForTimeout(1100)
+    await page.waitForTimeout(250)
+    const button = page.locator('.sheet .btn').first()
+    if (!(await button.isEnabled())) {
+      await page.locator('.sheet-backdrop').click({ position: { x: 40, y: 60 } })
+      continue
+    }
+    await button.click()
+    await page.waitForTimeout(2100)
+    captured += 1
   }
 
   await page.waitForSelector('.result', { timeout: 8000 })
-  check('本番ビルドでも役が判定される', (await page.locator('.result').innerText()).includes('東西南北'))
+  check('本番ビルドでも 5 枚そろえて結果へ進む', (await page.locator('.rcard').count()) === 5)
+  check('本番ビルドでも役とスコアが出る', (await page.locator('.result').innerText()).includes('最終スコア'))
   check('JavaScript のエラーが出ていない', errors.length === 0, errors.slice(0, 2).join(' | '))
 
   await browser.close()

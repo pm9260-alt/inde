@@ -19,6 +19,8 @@ export interface RankingEntry {
   /** 成立した最大役の名前。役なしのときは空文字。 */
   bestHandName: string
   playedAt: number
+  /** プレイしたエリア（区）。古い記録は空文字。 */
+  area: string
   /** この端末のプレイヤー本人の記録かどうか */
   isSelf: boolean
 }
@@ -73,6 +75,8 @@ interface StoredEntry {
   score: number
   bestHandName: string
   playedAt: number
+  /** プレイしたエリア（区）。古い記録には無い。 */
+  area?: string
 }
 
 function loadLocalEntries(): StoredEntry[] {
@@ -112,6 +116,7 @@ function toFirestoreFields(entry: StoredEntry): Record<string, unknown> {
     score: { integerValue: String(Math.round(entry.score)) },
     bestHandName: { stringValue: entry.bestHandName },
     playedAt: { integerValue: String(entry.playedAt) },
+    area: { stringValue: entry.area ?? '' },
   }
 }
 
@@ -136,7 +141,14 @@ function fromFirestoreFields(fields: Record<string, unknown> | undefined): Store
   const score = num('score')
   const playedAt = num('playedAt')
   if (!id || !Number.isFinite(score) || !Number.isFinite(playedAt)) return null
-  return { id, userName: str('userName') || 'プレイヤー', score, bestHandName: str('bestHandName'), playedAt }
+  return {
+    id,
+    userName: str('userName') || 'プレイヤー',
+    score,
+    bestHandName: str('bestHandName'),
+    playedAt,
+    area: str('area'),
+  }
 }
 
 async function fetchWithTimeout(url: string, init?: RequestInit): Promise<Response> {
@@ -196,6 +208,7 @@ export interface SubmitParams {
   score: number
   bestHandName: string
   playedAt: number
+  area?: string
 }
 
 /** スコアを記録する。共有側が失敗しても端末内には必ず残る。 */
@@ -206,6 +219,7 @@ export async function submitScore(params: SubmitParams): Promise<{ shared: boole
     score: params.score,
     bestHandName: params.bestHandName,
     playedAt: params.playedAt,
+    area: params.area ?? '',
   }
   saveLocalEntry(entry)
   if (!hasSharedRanking() || !isOnline()) return { shared: false }
@@ -217,11 +231,20 @@ export async function submitScore(params: SubmitParams): Promise<{ shared: boole
   }
 }
 
+export interface FetchRankingOptions {
+  /**
+   * エリアで絞り込む。区名を渡すとそのエリアだけを対象にする。
+   * 駅の密度によって作れる役が変わるため、同じ条件どうしで competing できるようにする。
+   */
+  area?: string
+}
+
 /** ランキングを取得する。共有が使えないときは端末内の記録で組み立てる。 */
 export async function fetchRanking(
   period: RankingPeriod,
   selfEntryIds: readonly string[],
   selfUserName: string,
+  options: FetchRankingOptions = {},
 ): Promise<RankingResult> {
   const since = periodStart(period)
   const localEntries = loadLocalEntries().filter((entry) => entry.playedAt >= since)
@@ -248,7 +271,11 @@ export async function fetchRanking(
   for (const entry of localEntries) merged.set(entry.id, entry)
 
   const selfIdSet = new Set(selfEntryIds)
-  const sorted = Array.from(merged.values())
+  const filtered = options.area
+    ? Array.from(merged.values()).filter((entry) => entry.area === options.area)
+    : Array.from(merged.values())
+
+  const sorted = filtered
     .sort((a, b) => b.score - a.score || a.playedAt - b.playedAt)
     .slice(0, MAX_ENTRIES)
     .map<RankingEntry>((entry) => ({
@@ -257,6 +284,7 @@ export async function fetchRanking(
       score: entry.score,
       bestHandName: entry.bestHandName,
       playedAt: entry.playedAt,
+      area: entry.area ?? '',
       isSelf: selfIdSet.has(entry.id),
     }))
 

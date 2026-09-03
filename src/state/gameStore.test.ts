@@ -8,7 +8,14 @@ import { GAME_RULES, LOCATION_RULES } from '@/config/gameConfig'
 import { offsetLatLng } from '@/domain/geo'
 import { fetchRanking } from '@/services/ranking'
 import { clearAll, loadJson, STORAGE_KEYS } from '@/services/storage'
-import { findCard, selectHand, selectHints, selectInterimScore, useGameStore } from '@/state/gameStore'
+import {
+  findCard,
+  selectDeckCardIds,
+  selectHand,
+  selectHints,
+  selectInterimScore,
+  useGameStore,
+} from '@/state/gameStore'
 import type { ActiveSession } from '@/state/types'
 
 const COMPASS_ROUTE = ['tokyo-東京', 'tokyo-西荻窪', 'tokyo-南砂町', 'tokyo-北品川', 'tokyo-上野']
@@ -31,6 +38,7 @@ function resetStore() {
     ready: false,
     phase: 'idle',
     session: null,
+    deck: null,
     result: null,
     dex: {},
     history: [],
@@ -39,6 +47,20 @@ function resetStore() {
     now: Date.now(),
   })
   useGameStore.getState().init()
+}
+
+/**
+ * テスト用に、狙ったカードを盤面へ入れてからゲームを始める。
+ * 盤面は毎回抽選されるため、そのままでは取りたい駅が入らないことがある。
+ */
+function startGameWithDeck(cardIds: readonly string[]) {
+  const store = useGameStore.getState
+  standAt(cardIds[0]!)
+  store().startGame()
+  const session = store().session!
+  useGameStore.setState({
+    session: { ...session, deckCardIds: Array.from(new Set([...cardIds, ...session.deckCardIds])) },
+  })
 }
 
 beforeEach(() => {
@@ -50,7 +72,7 @@ describe('ゲームループ', () => {
     const store = useGameStore.getState
 
     expect(store().phase).toBe('idle')
-    store().startGame()
+    startGameWithDeck(COMPASS_ROUTE)
     expect(store().phase).toBe('playing')
     expect(store().session?.captured).toHaveLength(0)
 
@@ -94,7 +116,7 @@ describe('ゲームループ', () => {
 
   it('遠すぎる地点は取得できない', () => {
     const store = useGameStore.getState
-    store().startGame()
+    startGameWithDeck(['tokyo-東京'])
     const card = findCard('tokyo-東京')!
     const far = offsetLatLng({ lat: card.lat, lng: card.lng }, 800, 0)
     store().updateFix({ coords: far, accuracy: 8, timestamp: Date.now(), mocked: true })
@@ -105,7 +127,7 @@ describe('ゲームループ', () => {
 
   it('同じカードは 1 ゲームで 1 回しか取れない', () => {
     const store = useGameStore.getState
-    store().startGame()
+    startGameWithDeck(['tokyo-東京'])
     standAt('tokyo-東京')
     expect(store().captureCard('tokyo-東京').ok).toBe(true)
     expect(store().captureCard('tokyo-東京').ok).toBe(false)
@@ -120,14 +142,14 @@ describe('ゲームループ', () => {
 
   it('GPS 精度が悪すぎると取得できない', () => {
     const store = useGameStore.getState
-    store().startGame()
+    startGameWithDeck(['tokyo-東京'])
     standAt('tokyo-東京', LOCATION_RULES.unusableAccuracyMeters + 50)
     expect(store().captureCard('tokyo-東京').ok).toBe(false)
   })
 
   it('取得のたびに役予告と暫定スコアが更新される', () => {
     const store = useGameStore.getState
-    store().startGame()
+    startGameWithDeck(COMPASS_ROUTE)
 
     standAt('tokyo-東京')
     store().captureCard('tokyo-東京')
@@ -146,7 +168,7 @@ describe('ゲームループ', () => {
 
   it('移動距離が積み上がる（小さすぎる揺れは無視する）', () => {
     const store = useGameStore.getState
-    store().startGame()
+    startGameWithDeck(['tokyo-東京'])
     const start = { lat: 35.6812, lng: 139.7671 }
     store().updateFix({ coords: start, accuracy: 8, timestamp: Date.now(), mocked: true })
 
@@ -173,7 +195,7 @@ describe('ゲームループ', () => {
 describe('時間切れ', () => {
   it('制限時間を過ぎたら自動で終了する', () => {
     const store = useGameStore.getState
-    store().startGame()
+    startGameWithDeck(['tokyo-東京'])
     standAt('tokyo-東京')
     store().captureCard('tokyo-東京')
 
@@ -190,7 +212,7 @@ describe('時間切れ', () => {
 
   it('5 枚に満たないと倍率が下がる', () => {
     const store = useGameStore.getState
-    store().startGame()
+    startGameWithDeck(['tokyo-東京'])
     standAt('tokyo-東京')
     store().captureCard('tokyo-東京')
     store().finishGame('timeup')
@@ -202,7 +224,7 @@ describe('時間切れ', () => {
 describe('中断と復帰', () => {
   it('進行中のゲームは保存され、開き直すと続きから遊べる', () => {
     const store = useGameStore.getState
-    store().startGame()
+    startGameWithDeck(['tokyo-東京'])
     standAt('tokyo-東京')
     store().captureCard('tokyo-東京')
 
@@ -219,7 +241,7 @@ describe('中断と復帰', () => {
 
   it('閉じている間に時間切れになっていたら、開いた時点で結果になる', () => {
     const store = useGameStore.getState
-    store().startGame()
+    startGameWithDeck(['tokyo-東京'])
     standAt('tokyo-東京')
     store().captureCard('tokyo-東京')
     useGameStore.setState({ session: { ...store().session!, endsAt: Date.now() - 60_000 } })
@@ -235,7 +257,7 @@ describe('中断と復帰', () => {
 
   it('1 枚も取らずにやめたら記録を残さない', () => {
     const store = useGameStore.getState
-    store().startGame()
+    startGameWithDeck(['tokyo-東京'])
     store().abortGame()
     expect(store().phase).toBe('idle')
     expect(store().history).toHaveLength(0)
@@ -244,7 +266,7 @@ describe('中断と復帰', () => {
 
   it('取得済みカードがある状態でやめたら結果を残す', () => {
     const store = useGameStore.getState
-    store().startGame()
+    startGameWithDeck(['tokyo-東京'])
     standAt('tokyo-東京')
     store().captureCard('tokyo-東京')
     store().abortGame()
@@ -266,7 +288,7 @@ describe('繰り返しプレイ', () => {
     const store = useGameStore.getState
 
     const playOnce = (route: string[]) => {
-      store().startGame()
+      startGameWithDeck(route)
       for (const cardId of route) {
         standAt(cardId)
         store().captureCard(cardId)
@@ -291,12 +313,92 @@ describe('取得演出', () => {
   it('取得するときっかけが立ち、消せる', () => {
     vi.useFakeTimers()
     const store = useGameStore.getState
-    store().startGame()
+    startGameWithDeck(['tokyo-東京'])
     standAt('tokyo-東京')
     store().captureCard('tokyo-東京')
     expect(store().captureFeedback?.card.name).toBe('東京')
     store().clearCaptureFeedback()
     expect(store().captureFeedback).toBeNull()
     vi.useRealTimers()
+  })
+})
+
+describe('盤面', () => {
+  it('ゲームを始めると盤面が固定される', () => {
+    const store = useGameStore.getState
+    standAt('tokyo-東京')
+    store().startGame()
+    const deck = store().session!.deckCardIds
+    expect(deck.length).toBeGreaterThan(0)
+    expect(selectDeckCardIds(store())).toEqual(deck)
+  })
+
+  it('ゲームごとに盤面の顔ぶれが変わる', () => {
+    const store = useGameStore.getState
+    const decks: string[][] = []
+    for (let i = 0; i < 6; i += 1) {
+      standAt('tokyo-東京')
+      store().startGame()
+      decks.push([...store().session!.deckCardIds].sort())
+      store().finishGame('timeup')
+      store().dismissResult()
+    }
+    const unique = new Set(decks.map((deck) => deck.join(',')))
+    expect(unique.size).toBeGreaterThan(1)
+  })
+
+  it('盤面に無いカードは取得できない', () => {
+    const store = useGameStore.getState
+    standAt('tokyo-東京')
+    store().startGame()
+    const session = store().session!
+    // 盤面から東京を外す
+    useGameStore.setState({
+      session: { ...session, deckCardIds: session.deckCardIds.filter((id) => id !== 'tokyo-東京') },
+    })
+    expect(selectDeckCardIds(store())).not.toContain('tokyo-東京')
+  })
+
+  it('開始地点の区が記録される', () => {
+    const store = useGameStore.getState
+    standAt('tokyo-東京')
+    store().startGame()
+    expect(store().session!.area).toBe('千代田区')
+    standAt('tokyo-東京')
+    store().captureCard(store().session!.deckCardIds[0]!)
+    store().finishGame('timeup')
+    expect(store().result!.area).toBe('千代田区')
+    expect(store().history[0]!.area).toBe('千代田区')
+  })
+})
+
+describe('取得の手ごたえ', () => {
+  it('役が成立した取得では、その役が feedback に入る', () => {
+    const store = useGameStore.getState
+    startGameWithDeck(['tokyo-東京', 'tokyo-東銀座'])
+
+    standAt('tokyo-東京')
+    store().captureCard('tokyo-東京')
+    expect(store().captureFeedback?.completedHand).toBeNull()
+    expect(store().captureFeedback?.nextHint).not.toBe('')
+
+    standAt('tokyo-東銀座')
+    store().captureCard('tokyo-東銀座')
+    expect(store().captureFeedback?.completedHand?.name).toBe('ペア')
+  })
+})
+
+describe('惜しかった役', () => {
+  it('あと 1 枚で届いた役を結果に残す', () => {
+    const store = useGameStore.getState
+    // 東・西・南 と無関係の 2 枚 → あと「北」で東西南北
+    const route = ['tokyo-東京', 'tokyo-西荻窪', 'tokyo-南砂町', 'tokyo-上野', 'tokyo-恵比寿']
+    startGameWithDeck(route)
+    for (const cardId of route) {
+      standAt(cardId)
+      store().captureCard(cardId)
+    }
+    store().finishGame('complete')
+    expect(store().result!.nearMiss?.text).toContain('北')
   })
 })

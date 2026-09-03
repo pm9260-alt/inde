@@ -7,6 +7,8 @@ export interface MapItem {
   lng: number
   /** 重なったときの前後関係。大きいほど手前。 */
   zIndex?: number
+  /** 所在する区。地図には出さないが、盤面の確認に使う。 */
+  ward?: string
   node: ReactNode
 }
 

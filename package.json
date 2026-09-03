@@ -13,7 +13,8 @@
     "import:stations": "node scripts/import-stations.mjs",
     "smoke:prod": "node scripts/smoke-prod.mjs",
     "build:demo": "node scripts/build-demo.mjs",
-    "smoke:demo": "node scripts/smoke-demo.mjs"
+    "smoke:demo": "node scripts/smoke-demo.mjs",
+    "report:balance": "vite-node src/tools/balanceReport.report.ts"
   },
   "repository": {
     "type": "git",
@@ -31,6 +32,7 @@
     "playwright": "^1.62.1",
     "typescript": "^5.9.3",
     "vite": "^7.3.6",
+    "vite-node": "^6.0.0",
     "vitest": "^3.2.7"
   },
   "dependencies": {

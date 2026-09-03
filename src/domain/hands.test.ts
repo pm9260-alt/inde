@@ -20,19 +20,24 @@ const handIds = (names: string[], municipality?: string): HandId[] =>
 
 describe('ペア・スリー・フォーカード', () => {
   it('同じ漢字 2 枚でペア', () => {
-    expect(handIds(['新宿', '新橋', '上野'])).toContain('pair')
+    expect(handIds(['東京', '東銀座', '上野'])).toContain('pair')
   })
 
   it('同じ漢字 3 枚でスリー（ペアは重ねて出さない）', () => {
-    const hands = handIds(['新宿', '新橋', '新木場'])
+    const hands = handIds(['東京', '東銀座', '東日本橋'])
     expect(hands).toContain('three')
     expect(hands).not.toContain('pair')
   })
 
   it('同じ漢字 4 枚でフォーカード', () => {
-    const hands = handIds(['新宿', '新橋', '新木場', '新中野'])
+    const hands = handIds(['東京', '東銀座', '東日本橋', '東陽町'])
     expect(hands).toContain('four')
     expect(hands).not.toContain('three')
+  })
+
+  it('属性を持たない漢字は対象にしない（辞書モードのとき）', () => {
+    // 「新」は属性辞書に無いので、そろえても役にはならない
+    expect(handIds(['新宿', '新橋', '新木場'])).not.toContain('three')
   })
 
   it('共通の漢字がなければ成立しない', () => {

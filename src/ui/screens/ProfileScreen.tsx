@@ -14,7 +14,7 @@ import { useGameStore } from '@/state/gameStore'
 import { DATA_SOURCE_LABEL } from '@/data/stations'
 import { formatDate } from '@/ui/format'
 
-export function ProfileScreen() {
+export function ProfileScreen({ onClose }: { onClose: () => void }) {
   const profile = useGameStore((state) => state.profile)
   const dex = useGameStore((state) => state.dex)
   const history = useGameStore((state) => state.history)
@@ -22,9 +22,12 @@ export function ProfileScreen() {
   const [draft, setDraft] = useState(profile.userName)
 
   return (
-    <div className="screen screen--scroll">
-      <div className="page-head">
-        <h1 className="page-head__title">プロフィール</h1>
+    <div className="screen screen--scroll screen--overlay">
+      <div className="subhead">
+        <button type="button" className="subhead__back" onClick={onClose}>
+          戻る
+        </button>
+        <h1 className="subhead__title">プロフィールと設定</h1>
       </div>
 
       <div className="section">

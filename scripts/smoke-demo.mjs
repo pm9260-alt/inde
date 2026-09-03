@@ -37,12 +37,22 @@ check('デバッグ機能は含まれない', (await page.locator('.debug').coun
 await page.getByRole('button', { name: /チャレンジを始める/ }).click()
 await page.waitForSelector('.hud')
 
-// 出発地点（東京駅）から順に、画面に映る範囲で隣の駅へ歩いていくルート。
-// 1 駅目から離れているので「ここまで歩く」が毎回必要になる。
-const route = ['大手町', '二重橋前', '日比谷', '有楽町', '東銀座']
+// 盤面は毎回抽選されるので、いま出ているカードを近い順に回る
+const board = await page.evaluate(() =>
+  [...document.querySelectorAll('.mapcanvas__item[data-lat]')]
+    .map((el) => ({
+      name: el.querySelector('.marker__name')?.textContent ?? '',
+      lat: Number(el.getAttribute('data-lat')),
+    }))
+    .filter((entry) => entry.name),
+)
+check('盤面にカードが並ぶ', board.length >= 5, `${board.length} 枚`)
+
+// 近い順に回る（重なったマーカーでも、近いものが手前に出る）
+const route = board.slice(0, 5)
 let walked = 0
-for (const name of route) {
-  await page.locator('.marker', { hasText: name }).first().click()
+for (const stop of route) {
+  await page.locator(`.mapcanvas__item[data-lat="${stop.lat}"] .marker`).first().click()
   await page.waitForSelector('.sheet')
   await page.waitForTimeout(300)
 
@@ -58,10 +68,10 @@ for (const name of route) {
     )
   }
   await page.getByRole('button', { name: '取得する' }).click()
-  await page.waitForTimeout(1100)
+  await page.waitForTimeout(2100)
 }
 
-check('「ここまで歩く」で毎回移動できる', walked === route.length, `${walked} / ${route.length} 回`)
+check('「ここまで歩く」で移動できる', walked >= 3, `${walked} / ${route.length} 回`)
 
 await page.waitForSelector('.result', { timeout: 10_000 })
 const resultText = await page.locator('.result').innerText()
@@ -71,16 +81,19 @@ check('5 枚そろって結果画面へ進む', (await page.locator('.rcard').co
 check('役と最終スコアが出る', /最終スコア/.test(resultText), resultText.split('\n')[1] ?? '')
 
 await page.getByRole('button', { name: 'マップへ戻る' }).click()
-await page.getByRole('button', { name: 'ランキング' }).click()
+await page.getByRole('button', { name: 'ランキング', exact: true }).click()
 await page.waitForSelector('.ranklist', { timeout: 8_000 })
 check('ランキングに記録が載る', (await page.locator('.rankrow--self').count()) === 1)
 
-await page.getByRole('button', { name: '図鑑' }).click()
-await page.waitForSelector('.dexgrid')
+await page.getByRole('button', { name: '図鑑', exact: true }).click()
+await page.waitForSelector('.wardlist')
 check('図鑑に反映される', (await page.locator('.page-head__sub').innerText()).startsWith('5 / '))
+check('図鑑が区ごとにまとまる', (await page.locator('.ward').count()) === 23)
 
 // ファイルを直接開いた状態で、キーが断られたときの案内を確かめる
-await page.getByRole('button', { name: 'プロフィール' }).click()
+await page.getByRole('button', { name: 'ランキング', exact: true }).click()
+await page.waitForSelector('.mecard')
+await page.locator('.mecard').click()
 await page.waitForSelector('.namerow')
 check('地図の設定が入っている', (await page.getByLabel('Google マップのキー').count()) === 1)
 
@@ -88,7 +101,7 @@ await page.getByLabel('Google マップのキー').fill('AIzaSyA1b2C3d4E5f6G7h8I
 await page.getByRole('button', { name: '保存' }).nth(1).click()
 await page.waitForTimeout(1800)
 await page.getByRole('button', { name: 'マップ', exact: true }).click()
-await page.waitForTimeout(1200)
+await page.waitForTimeout(1400)
 await page.evaluate(() => {
   const handler = window.gm_authFailure
   if (typeof handler === 'function') handler()

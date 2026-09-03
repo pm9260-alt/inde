@@ -410,6 +410,12 @@ input {
   color: var(--ink-3);
 }
 
+.marker--compact .marker__pill {
+  max-width: 96px;
+  padding: 3px 6px;
+  font-size: 11px;
+}
+
 .marker__stem {
   width: 1px;
   height: 8px;
@@ -525,11 +531,19 @@ input {
   margin-left: auto;
 }
 
+.hud__bottom {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 16px 10px;
+}
+
 .hud__hints {
   display: flex;
   gap: 8px;
+  flex: 1;
+  min-width: 0;
   overflow-x: auto;
-  padding: 0 16px 10px;
   scrollbar-width: none;
 }
 
@@ -552,6 +566,13 @@ input {
   border-color: var(--accent);
   color: var(--accent);
   background: var(--accent-soft);
+}
+
+.hint--quiet {
+  color: var(--ink-3);
+  background: transparent;
+  border-color: transparent;
+  padding-left: 0;
 }
 
 /* ---------------- 手札 ---------------- */
@@ -756,6 +777,78 @@ input {
   color: var(--ink-3);
 }
 
+/* 属性は一拍おいて現れる */
+.capture__attr {
+  animation: fade-up 0.32s ease 0.2s backwards;
+}
+
+.capture__next {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  font-size: 12.5px;
+  color: var(--ink-2);
+  white-space: nowrap;
+  animation: fade-up 0.32s ease 0.34s backwards;
+}
+
+/* 役が成立した瞬間だけ、一段強くする */
+.capture__hand {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--accent);
+  animation: hand-pop 0.44s cubic-bezier(0.16, 1, 0.3, 1) 0.36s backwards;
+}
+
+.capture__handname {
+  font-size: 21px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+.capture__handmult {
+  font-size: 16px;
+  font-weight: 650;
+  color: var(--accent);
+}
+
+.capture--hand .capture__card {
+  border-color: var(--accent);
+  animation-duration: 1.85s;
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes hand-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  60% {
+    opacity: 1;
+    transform: scale(1.06);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
 @keyframes capture-in {
   0% {
     opacity: 0;
@@ -800,9 +893,13 @@ input {
 
 @media (prefers-reduced-motion: reduce) {
   .capture__card,
+  .capture__attr,
+  .capture__hand,
+  .capture__next,
   .sheet,
   .sheet-backdrop {
     animation-duration: 0.01ms;
+    animation-delay: 0ms;
   }
 }
 
@@ -1157,4 +1254,229 @@ input {
   font-size: 12px;
   color: var(--ink-3);
   line-height: 1.6;
+}
+
+/* ---------------- 役の画面 ---------------- */
+
+.chance {
+  border-left: 2px solid var(--accent);
+  padding: 8px 0 8px 12px;
+  margin-bottom: 12px;
+}
+
+.chance__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.chance__name {
+  font-size: 16px;
+  font-weight: 650;
+}
+
+.chance__mult {
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+.chance__note {
+  margin: 2px 0 0;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+
+.handname {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.handcond {
+  display: block;
+  font-size: 12px;
+  color: var(--ink-3);
+  margin-top: 1px;
+}
+
+.metarow__value.attrsample {
+  font-weight: 500;
+  font-size: 13px;
+  color: var(--ink-2);
+  letter-spacing: 0.08em;
+  white-space: normal;
+  text-align: right;
+}
+
+/* ---------------- ランキングの自分の行 ---------------- */
+
+.mecard {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 12px;
+  width: calc(100% - 40px);
+  margin: 0 20px 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-sub);
+  text-align: left;
+}
+
+.mecard__name {
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.mecard__go {
+  grid-row: 1 / span 2;
+  align-self: center;
+  font-size: 12px;
+  color: var(--ink-2);
+  text-decoration: underline;
+  white-space: nowrap;
+}
+
+.mecard__stats {
+  font-size: 12px;
+  color: var(--ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.areanote {
+  margin: -6px 20px 14px;
+}
+
+/* ---------------- 下位画面（プロフィールなど） ---------------- */
+
+.screen--overlay {
+  background: var(--bg);
+  z-index: 20;
+}
+
+.subhead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px 12px;
+  border-bottom: 1px solid var(--line);
+  flex: none;
+}
+
+.subhead__back {
+  font-size: 13px;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+.subhead__title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 650;
+}
+
+/* ---------------- HUD の役ボタン ---------------- */
+
+.hud__hands {
+  flex: none;
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  background: #fff;
+  white-space: nowrap;
+}
+
+/* ---------------- 結果画面の「次」 ---------------- */
+
+.nearmiss {
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--accent);
+  padding: 14px 16px;
+}
+
+.nearmiss__label {
+  margin: 0;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--ink-3);
+}
+
+.nearmiss__text {
+  margin: 6px 0 0;
+  font-size: 16px;
+  font-weight: 650;
+  line-height: 1.5;
+}
+
+.nearmiss__mult {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.result__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.result__actions .btn--ghost {
+  width: 100%;
+  height: 44px;
+}
+
+/* ---------------- 図鑑の区ごとのまとまり ---------------- */
+
+.wardlist {
+  padding: 0 20px 32px;
+}
+
+.ward + .ward {
+  border-top: 1px solid var(--line);
+}
+
+.ward__head {
+  display: grid;
+  grid-template-columns: 1fr auto 20px;
+  align-items: baseline;
+  gap: 12px;
+  width: 100%;
+  padding: 14px 0;
+  text-align: left;
+}
+
+.ward__name {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.ward__count {
+  font-size: 13px;
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+
+.ward__head[aria-expanded='true'] .ward__count {
+  color: var(--ink);
+}
+
+.ward__mark {
+  font-size: 13px;
+  color: var(--ink-3);
+  text-align: right;
+}
+
+.ward .dexgrid {
+  padding: 0 0 16px;
 }

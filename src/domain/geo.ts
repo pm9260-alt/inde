@@ -34,3 +34,41 @@ export function offsetLatLng(origin: LatLng, meters: number, bearingDeg = 0): La
     (111_320 * Math.cos((origin.lat * Math.PI) / 180))
   return { lat: origin.lat + latDelta, lng: origin.lng + lngDelta }
 }
+
+/**
+ * 指定した地点がすべて画面に収まる拡大率を返す。
+ * 開始前に盤面の全体像を見せるために使う。
+ */
+export function zoomToFit(
+  points: readonly LatLng[],
+  widthPx: number,
+  heightPx: number,
+  options: { padding?: number; min?: number; max?: number } = {},
+): number {
+  const { padding = 1.25, min = 11, max = 16 } = options
+  if (points.length === 0 || widthPx <= 0 || heightPx <= 0) return max
+
+  let minLat = Infinity
+  let maxLat = -Infinity
+  let minLng = Infinity
+  let maxLng = -Infinity
+  for (const point of points) {
+    minLat = Math.min(minLat, point.lat)
+    maxLat = Math.max(maxLat, point.lat)
+    minLng = Math.min(minLng, point.lng)
+    maxLng = Math.max(maxLng, point.lng)
+  }
+
+  const centerLat = (minLat + maxLat) / 2
+  const latMeters = distanceMeters({ lat: minLat, lng: centerLat }, { lat: maxLat, lng: centerLat })
+  const lngMeters = distanceMeters({ lat: centerLat, lng: minLng }, { lat: centerLat, lng: maxLng })
+  if (latMeters === 0 && lngMeters === 0) return max
+
+  const metersPerPixel = Math.max(
+    (lngMeters * padding) / widthPx,
+    (latMeters * padding) / heightPx,
+    0.5,
+  )
+  const zoom = Math.log2((156543.03392 * Math.cos((centerLat * Math.PI) / 180)) / metersPerPixel)
+  return Math.max(min, Math.min(max, Math.floor(zoom * 10) / 10))
+}

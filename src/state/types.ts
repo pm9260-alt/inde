@@ -1,4 +1,4 @@
-import type { PlaceCard, ScoreBreakdown } from '@/domain/types'
+import type { HandHint, PlaceCard, ScoreBreakdown } from '@/domain/types'
 
 export interface Profile {
   userId: string
@@ -34,6 +34,8 @@ export interface PlayRecord {
   durationSeconds: number
   distanceMeters: number
   finishReason: FinishReason
+  /** プレイしたエリア（区）。古い記録には無い。 */
+  area?: string
 }
 
 export type FinishReason = 'complete' | 'timeup' | 'aborted'
@@ -46,6 +48,18 @@ export interface ActiveSession {
   captured: Array<{ cardId: string; capturedAt: number; distanceAtCapture: number }>
   distanceMeters: number
   lastPoint: { lat: number; lng: number } | null
+  /** 今回のゲームで取れるカード（開始時に抽選して固定する） */
+  deckCardIds: string[]
+  /** 開始地点の区。エリア別ランキングに使う。 */
+  area: string
+}
+
+/** 開始前の盤面（まだゲームが始まっていない状態の候補カード） */
+export interface Deck {
+  seed: number
+  origin: { lat: number; lng: number }
+  cardIds: string[]
+  area: string
 }
 
 export interface GameResult {
@@ -58,6 +72,9 @@ export interface GameResult {
   previousBest: number
   isNewBest: boolean
   finishReason: FinishReason
+  area: string
+  /** あと 1 枚で成立していた役 */
+  nearMiss: HandHint | null
 }
 
 export type GamePhase = 'idle' | 'playing' | 'result'

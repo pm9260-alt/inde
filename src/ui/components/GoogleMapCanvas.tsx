@@ -91,6 +91,11 @@ export function GoogleMapCanvas({ center, zoom, items, onUserInteract, onError }
     mapRef.current?.panTo(center)
   }, [center.lat, center.lng])
 
+  // 盤面の広さに応じた拡大率を反映する
+  useEffect(() => {
+    mapRef.current?.setZoom(zoom)
+  }, [zoom])
+
   // マーカーの位置を再計算
   useEffect(() => {
     overlayRef.current?.draw()
@@ -107,6 +112,7 @@ export function GoogleMapCanvas({ center, zoom, items, onUserInteract, onError }
               className="mapcanvas__item"
               data-lat={item.lat}
               data-lng={item.lng}
+              data-ward={item.ward}
               style={{ zIndex: item.zIndex ?? 1 }}
             >
               {item.node}

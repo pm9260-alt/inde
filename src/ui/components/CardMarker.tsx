@@ -6,15 +6,18 @@ interface Props {
   captured: boolean
   inRange: boolean
   selected: boolean
+  /** 広い範囲を映しているときは小さく表示して、重なりを減らす */
+  compact: boolean
   onSelect: (cardId: string) => void
 }
 
-export function CardMarker({ card, captured, inRange, selected, onSelect }: Props) {
+export function CardMarker({ card, captured, inRange, selected, compact, onSelect }: Props) {
   const className = [
     'marker',
     inRange && !captured ? 'marker--near' : '',
     captured ? 'marker--captured' : '',
     selected ? 'marker--selected' : '',
+    compact && !selected ? 'marker--compact' : '',
   ]
     .filter(Boolean)
     .join(' ')
@@ -35,7 +38,7 @@ export function CardMarker({ card, captured, inRange, selected, onSelect }: Prop
         <span className="marker__name">{card.name}</span>
         {captured ? (
           <span className="marker__done">済</span>
-        ) : attribute ? (
+        ) : attribute && !compact ? (
           <span className="marker__attr">{attribute}</span>
         ) : null}
       </span>

@@ -11,7 +11,8 @@ import { buildHandHints } from '@/domain/handHints'
 import { calculateScore } from '@/domain/scoring'
 import type { LatLng } from '@/domain/geo'
 import type { HandHint, PlaceCard, ScoreBreakdown } from '@/domain/types'
-import { useGameStore } from '@/state/gameStore'
+import { analyzeBoard, type BoardChance } from '@/domain/board'
+import { selectDeckCardIds, useGameStore } from '@/state/gameStore'
 import { cardsOf, nearbyCards, type NearbyCard } from '@/state/selectors'
 
 const EMPTY_CAPTURED: ReadonlyArray<{ cardId: string }> = []
@@ -33,11 +34,14 @@ export function useHandHints(hand: readonly PlaceCard[]): HandHint[] {
 }
 
 /**
- * 現在地から近い順の候補カード。
+ * いま盤面に出ているカードを、現在地から近い順に返す。
+ *
+ * 盤面はゲームごとに抽選された 20 枚。周辺のすべての駅ではない。
  * 現在地は小刻みに動き続けるので、およそ 20m 単位に丸めてから再計算する。
  */
-export function useNearbyCards(center: LatLng | null): NearbyCard[] {
+export function useBoardCards(center: LatLng | null): NearbyCard[] {
   const captured = useGameStore((state) => state.session?.captured ?? EMPTY_CAPTURED)
+  const deckIds = useGameStore(selectDeckCardIds)
   const latKey = center ? Math.round(center.lat * 5000) : null
   const lngKey = center ? Math.round(center.lng * 5000) : null
   const lat = center?.lat ?? null
@@ -45,10 +49,18 @@ export function useNearbyCards(center: LatLng | null): NearbyCard[] {
 
   return useMemo(() => {
     const capturedIds = new Set(captured.map((entry) => entry.cardId))
-    return nearbyCards(lat === null || lng === null ? null : { lat, lng }, capturedIds)
+    const allowed = new Set(deckIds)
+    const all = nearbyCards(lat === null || lng === null ? null : { lat, lng }, capturedIds)
+    if (allowed.size === 0) return all
+    return all.filter((entry) => allowed.has(entry.card.id))
     // lat/lng そのものではなく丸めた値を依存に使う
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [captured, latKey, lngKey])
+  }, [captured, deckIds, latKey, lngKey])
+}
+
+/** いまの盤面で狙える役 */
+export function useBoardChances(board: readonly NearbyCard[]): BoardChance[] {
+  return useMemo(() => analyzeBoard(board.map((entry) => entry.card)), [board])
 }
 
 /** 残り時間（秒）。ゲーム中でなければ null。 */

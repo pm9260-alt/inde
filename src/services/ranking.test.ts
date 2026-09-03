@@ -38,6 +38,7 @@ describe('Firestore の形式変換', () => {
     score: 9200,
     bestHandName: '東西南北',
     playedAt: 1_756_900_000_000,
+    area: '千代田区',
   }
 
   it('往復して同じ値になる', () => {
@@ -79,6 +80,18 @@ describe('スコアの記録と取得', () => {
     expect(ranking.entries.map((e) => e.id)).toEqual(['b', 'c', 'a'])
     expect(ranking.selfRank).toBe(2)
     expect(ranking.entries[1]!.isSelf).toBe(true)
+  })
+
+  it('エリアで絞り込める', async () => {
+    const now = Date.now()
+    await submitScore({ entryId: 'x1', userName: 'A', score: 900, bestHandName: '', playedAt: now, area: '渋谷区' })
+    await submitScore({ entryId: 'x2', userName: 'B', score: 800, bestHandName: '', playedAt: now, area: '新宿区' })
+
+    const shibuya = await fetchRanking('all', ['x1'], 'A', { area: '渋谷区' })
+    expect(shibuya.entries.map((e) => e.id)).toEqual(['x1'])
+
+    const all = await fetchRanking('all', ['x1'], 'A')
+    expect(all.entries.map((e) => e.id)).toEqual(expect.arrayContaining(['x1', 'x2']))
   })
 
   it('通信に失敗してもエラーにせず、端末内の記録を返す', async () => {

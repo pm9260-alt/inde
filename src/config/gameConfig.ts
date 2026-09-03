@@ -31,9 +31,17 @@ export const LOCATION_RULES = {
   poorAccuracyThresholdMeters: 60,
   /** これより精度が悪いと取得自体を止める (m) */
   unusableAccuracyMeters: 200,
-  /** マップに表示する候補地点の範囲 (m) */
-  nearbyRadiusMeters: 3000,
-  /** マップに一度に表示する最大件数（描画負荷対策） */
+  /**
+   * 盤面の候補にする範囲 (m)。
+   *
+   * ここを狭くすると、東西南北・ナンバーストレートなどの役が
+   * そもそも成立しない盤面ばかりになる（実測で確認済み）。
+   * 逆に広げすぎると 30 分では回りきれなくなるため、
+   * 実地テストの結果を見て調整すること。
+   * 現在の値での盤面の広さは npm run report:balance で確認できる。
+   */
+  nearbyRadiusMeters: 4500,
+  /** 盤面を作るときに検討する候補の最大件数 */
   maxNearbyMarkers: 60,
   /** 移動距離に加算する最小移動量 (m)。GPS の揺れを無視するため。 */
   minMovementStepMeters: 8,
@@ -70,7 +78,7 @@ export const CARD_POINTS = {
  *  - 'dictionary' : 属性辞書に載っている漢字だけが対象
  * 街を歩くルート選びの幅が広い 'all' を既定にしている。
  */
-export const TARGET_KANJI_MODE: 'all' | 'dictionary' = 'all'
+export const TARGET_KANJI_MODE: 'all' | 'dictionary' = 'dictionary'
 
 export const HAND_RULES = {
   /** ⑥ カラー：異なる色属性が何種類そろえば成立するか */

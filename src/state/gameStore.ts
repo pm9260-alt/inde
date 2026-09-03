@@ -10,9 +10,11 @@
  */
 import { create } from 'zustand'
 import { GAME_RULES, LOCATION_RULES } from '@/config/gameConfig'
+import { buildDeck, DECK_RULES } from '@/domain/board'
 import { evaluateCaptureEligibility } from '@/domain/capture'
 import { distanceMeters as distanceBetween, type LatLng } from '@/domain/geo'
-import { buildHandHints } from '@/domain/handHints'
+import { buildHandHints, findNearMiss } from '@/domain/handHints'
+import { evaluateHands } from '@/domain/hands'
 import { calculateScore } from '@/domain/scoring'
 import type { HandHint, PlaceCard, ScoreBreakdown } from '@/domain/types'
 import { findCard } from '@/state/cards'
@@ -22,6 +24,7 @@ import { submitScore } from '@/services/ranking'
 import type { GeoFix } from '@/services/geolocation'
 import type {
   ActiveSession,
+  Deck,
   DexEntry,
   FinishReason,
   GamePhase,
@@ -54,6 +57,10 @@ function createProfile(): Profile {
 export interface CaptureFeedback {
   card: PlaceCard
   at: number
+  /** この 1 枚で新しく成立した役。無ければ null。 */
+  completedHand: { name: string; multiplier: number } | null
+  /** 成立していないときの、いちばん近い予告 */
+  nextHint: string
 }
 
 interface GameState {
@@ -63,6 +70,8 @@ interface GameState {
   dex: Record<string, DexEntry>
   history: PlayRecord[]
   session: ActiveSession | null
+  /** 開始前の盤面。ゲーム中は session.deckCardIds を使う。 */
+  deck: Deck | null
   result: GameResult | null
   /** 取得演出のためのきっかけ */
   captureFeedback: CaptureFeedback | null
@@ -72,6 +81,8 @@ interface GameState {
 
   init: () => void
   setUserName: (name: string) => void
+  /** 現在地に合わせて盤面を引き直す */
+  refreshDeck: (force?: boolean) => void
   updateFix: (fix: GeoFix | null) => void
   tick: () => void
   startGame: () => void
@@ -92,6 +103,7 @@ export const useGameStore = create<GameState>((set, get) => ({
   dex: {},
   history: [],
   session: null,
+  deck: null,
   result: null,
   captureFeedback: null,
   fix: null,
@@ -129,9 +141,32 @@ export const useGameStore = create<GameState>((set, get) => ({
     saveJson(STORAGE_KEYS.profile, profile)
   },
 
+  refreshDeck: (force = false) => {
+    const { fix, deck, phase } = get()
+    if (!fix || phase === 'playing') return
+    if (!force && deck) {
+      const moved = distanceBetween(deck.origin, fix.coords)
+      if (moved < DECK_RULES.refreshDistanceMeters) return
+    }
+    const capturedIds = new Set<string>()
+    const candidates = nearbyCards(fix.coords, capturedIds).map((entry) => entry.card)
+    if (candidates.length === 0) return
+    const seed = Math.floor(Math.random() * 0xffffffff)
+    const cards = buildDeck(candidates, seed)
+    set({
+      deck: {
+        seed,
+        origin: fix.coords,
+        cardIds: cards.map((card) => card.id),
+        area: candidates[0]?.municipality ?? '',
+      },
+    })
+  },
+
   updateFix: (fix) => {
     const previous = get().fix
     set({ fix, now: Date.now() })
+    get().refreshDeck()
 
     // 移動距離の加算（ゲーム中のみ）
     const session = get().session
@@ -161,6 +196,9 @@ export const useGameStore = create<GameState>((set, get) => ({
   startGame: () => {
     const now = Date.now()
     const fix = get().fix
+    // 開始のたびに盤面を引き直す。同じ場所から始めても顔ぶれが変わるようにする。
+    get().refreshDeck(true)
+    const deck = get().deck
     const session: ActiveSession = {
       id: createId('game'),
       startedAt: now,
@@ -168,6 +206,8 @@ export const useGameStore = create<GameState>((set, get) => ({
       captured: [],
       distanceMeters: 0,
       lastPoint: fix?.coords ?? null,
+      deckCardIds: deck?.cardIds ?? [],
+      area: deck?.area ?? '',
     }
     set({ session, phase: 'playing', result: null, now })
     saveJson(STORAGE_KEYS.activeSession, session)
@@ -191,12 +231,28 @@ export const useGameStore = create<GameState>((set, get) => ({
       return { ok: false, message: '取得できませんでした' }
     }
 
+    // この 1 枚で新しく成立した役を調べる（取得の手ごたえを変えるため）
+    const before = evaluateHands(cardsOf(session.captured.map((entry) => entry.cardId)))
     const captured = [
       ...session.captured,
       { cardId, capturedAt: Date.now(), distanceAtCapture: Math.round(distance ?? 0) },
     ]
     updateSession(set, get, { captured })
-    set({ captureFeedback: { card, at: Date.now() } })
+
+    const handCards = cardsOf(captured.map((entry) => entry.cardId))
+    const after = evaluateHands(handCards)
+    const beforeIds = new Set(before.map((hand) => hand.id))
+    const newHand = after.find((hand) => !beforeIds.has(hand.id)) ?? null
+    const hints = buildHandHints(handCards)
+
+    set({
+      captureFeedback: {
+        card,
+        at: Date.now(),
+        completedHand: newHand ? { name: newHand.name, multiplier: newHand.multiplier } : null,
+        nextHint: hints[0]?.text ?? '',
+      },
+    })
 
     if (captured.length >= GAME_RULES.handSize) {
       // 演出を見せてから結果画面へ
@@ -232,6 +288,7 @@ export const useGameStore = create<GameState>((set, get) => ({
       durationSeconds,
       distanceMeters: Math.round(session.distanceMeters),
       finishReason: reason,
+      area: session.area,
     }
 
     const nextDex = { ...dex }
@@ -271,6 +328,8 @@ export const useGameStore = create<GameState>((set, get) => ({
       previousBest,
       isNewBest: score.finalScore > previousBest && cards.length > 0,
       finishReason: reason,
+      area: session.area,
+      nearMiss: cards.length > 0 ? findNearMiss(cards) : null,
     }
 
     set({
@@ -286,6 +345,8 @@ export const useGameStore = create<GameState>((set, get) => ({
     saveJson(STORAGE_KEYS.profile, nextProfile)
     saveJson(STORAGE_KEYS.dex, nextDex)
     saveJson(STORAGE_KEYS.history, nextHistory)
+    // 次に遊ぶときは違う盤面から始まるようにする
+    get().refreshDeck(true)
 
     if (cards.length > 0) {
       void submitScore({
@@ -294,6 +355,7 @@ export const useGameStore = create<GameState>((set, get) => ({
         score: record.score,
         bestHandName: record.bestHandName,
         playedAt: record.playedAt,
+        area: record.area ?? '',
       })
     }
   },
@@ -400,8 +462,21 @@ export function selectRemainingSeconds(state: GameState): number | null {
   return Math.max(0, Math.ceil((state.session.endsAt - state.now) / 1000))
 }
 
-/** 現在地から見た、近い順の候補カード */
+/** 現在地から見た、近い順の候補カード（盤面の抽選を通していない全体） */
 export function selectNearbyCards(state: GameState, center: LatLng | null): NearbyCard[] {
   const capturedIds = new Set(state.session?.captured.map((entry) => entry.cardId) ?? [])
   return nearbyCards(center, capturedIds)
+}
+
+/**
+ * いま盤面に出ているカードの ID。
+ *
+ * 毎回新しい配列を返すと React が変化し続けたと判断して再描画が止まらなくなるため、
+ * 空のときは共通の定数を返す。
+ */
+const EMPTY_CARD_IDS: string[] = []
+
+export function selectDeckCardIds(state: GameState): string[] {
+  if (state.phase === 'playing' && state.session) return state.session.deckCardIds
+  return state.deck?.cardIds ?? EMPTY_CARD_IDS
 }
