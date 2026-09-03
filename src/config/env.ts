@@ -23,6 +23,14 @@ export const ENV = {
   isDev: import.meta.env.DEV === true,
 } as const
 
+/**
+ * デモ版かどうか。
+ *
+ * 外を歩かなくてもゲームを一通り試せるように、現在地を画面上で動かせる。
+ * ビルド時に確定する定数なので、通常のビルドではデモ用のコードごと取り除かれる。
+ */
+export const IS_DEMO: boolean = import.meta.env.VITE_DEMO_MODE === 'on'
+
 export const hasGoogleMaps = (): boolean => ENV.googleMapsApiKey.length > 0
 export const hasSharedRanking = (): boolean =>
   ENV.firebaseProjectId.length > 0 && ENV.firebaseApiKey.length > 0

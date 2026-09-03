@@ -11,7 +11,9 @@
     "test:watch": "vitest",
     "e2e": "node scripts/e2e.mjs",
     "import:stations": "node scripts/import-stations.mjs",
-    "smoke:prod": "node scripts/smoke-prod.mjs"
+    "smoke:prod": "node scripts/smoke-prod.mjs",
+    "build:demo": "node scripts/build-demo.mjs",
+    "smoke:demo": "node scripts/smoke-demo.mjs"
   },
   "repository": {
     "type": "git",

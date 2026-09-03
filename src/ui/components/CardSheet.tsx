@@ -13,6 +13,9 @@ interface Props {
   dexEntry: DexEntry | undefined
   onCapture: () => void
   onClose: () => void
+  /** デモ版だけ: この地点まで歩く。通常のビルドでは渡さない。 */
+  onWalk?: (() => void) | undefined
+  walking?: boolean
 }
 
 export function CardSheet({
@@ -23,6 +26,8 @@ export function CardSheet({
   dexEntry,
   onCapture,
   onClose,
+  onWalk,
+  walking = false,
 }: Props) {
   const attributes = attributeLabels(card)
   const blockMessage = captureBlockMessage(eligibility.reason, eligibility.metersToGo)
@@ -71,14 +76,20 @@ export function CardSheet({
         </div>
 
         <div className="sheet__action">
-          <button
-            type="button"
-            className={eligibility.canCapture ? 'btn btn--ok' : 'btn btn--primary'}
-            disabled={!eligibility.canCapture}
-            onClick={onCapture}
-          >
-            取得する
-          </button>
+          {onWalk && !eligibility.canCapture && !captured ? (
+            <button type="button" className="btn btn--primary" disabled={walking} onClick={onWalk}>
+              {walking ? '歩いています' : 'ここまで歩く'}
+            </button>
+          ) : (
+            <button
+              type="button"
+              className={eligibility.canCapture ? 'btn btn--ok' : 'btn btn--primary'}
+              disabled={!eligibility.canCapture}
+              onClick={onCapture}
+            >
+              取得する
+            </button>
+          )}
           {!eligibility.canCapture && blockMessage && (
             <p className="sheet__hint">{blockMessage}</p>
           )}

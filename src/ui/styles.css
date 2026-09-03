@@ -261,6 +261,11 @@ input {
   color: #96503f;
 }
 
+.notice--demo {
+  background: #f3f5f8;
+  border-bottom-color: #dfe3e8;
+}
+
 .notice--warn {
   background: var(--accent-soft);
   color: #7c2618;

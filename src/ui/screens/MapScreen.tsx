@@ -6,7 +6,8 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { GAME_RULES, LOCATION_RULES } from '@/config/gameConfig'
-import { hasGoogleMaps } from '@/config/env'
+import { IS_DEMO, hasGoogleMaps } from '@/config/env'
+import { startDemoLocation, useRealLocation, walkTo } from '@/demo/demoWalk'
 import { evaluateCaptureEligibility } from '@/domain/capture'
 import { distanceMeters, formatDistance, type LatLng } from '@/domain/geo'
 import type { PlaceCard } from '@/domain/types'
@@ -53,7 +54,14 @@ export function MapScreen({ geo }: { geo: GeoState }) {
   const [mapCenter, setMapCenter] = useState<LatLng>(center)
   const [mapsFailed, setMapsFailed] = useState(false)
   const [toast, setToast] = useState('')
+  const [walking, setWalking] = useState(false)
+  const [demoRealGps, setDemoRealGps] = useState(false)
   const lastCenterRef = useRef<string>('')
+
+  // デモ版は東京駅から始める（外を歩かなくても試せるように）
+  useEffect(() => {
+    if (IS_DEMO && !demoRealGps) startDemoLocation()
+  }, [demoRealGps])
 
   // 追従中は現在地に合わせて地図を動かす
   useEffect(() => {
@@ -132,6 +140,13 @@ export function MapScreen({ geo }: { geo: GeoState }) {
   const useGoogle = hasGoogleMaps() && !mapsFailed
   const nearestUncaptured = nearby.find((entry) => !entry.captured)
 
+  const handleWalk = () => {
+    if (!selectedCard || !fix) return
+    setFollowing(true)
+    setWalking(true)
+    walkTo(fix.coords, { lat: selectedCard.lat, lng: selectedCard.lng }, () => setWalking(false))
+  }
+
   const handleCapture = () => {
     if (!selectedCard) return
     const result = captureCard(selectedCard.id)
@@ -154,8 +169,38 @@ export function MapScreen({ geo }: { geo: GeoState }) {
         />
       )}
 
+      {IS_DEMO && (
+        <div className="notice notice--demo">
+          <span className="notice__text">
+            <span className="notice__main">
+              {demoRealGps ? 'お試し版（実際の現在地）' : 'お試し版（東京駅から歩けます）'}
+            </span>
+            <span className="notice__sub">
+              {demoRealGps
+                ? '東京 23 区にいないとカードは見つかりません'
+                : 'カードを選び「ここまで歩く」を押すと近づきます'}
+            </span>
+          </span>
+          <button
+            type="button"
+            className="notice__action"
+            onClick={() => {
+              if (demoRealGps) {
+                setDemoRealGps(false)
+                startDemoLocation()
+              } else {
+                setDemoRealGps(true)
+                useRealLocation()
+              }
+            }}
+          >
+            {demoRealGps ? '東京駅へ' : '現在地を使う'}
+          </button>
+        </div>
+      )}
+
       <LocationNotice geo={geo} />
-      {!useGoogle && (
+      {!useGoogle && !IS_DEMO && (
         <div className="notice">
           <span className="notice__text">
             <span className="notice__main">簡易マップで表示しています</span>
@@ -230,6 +275,8 @@ export function MapScreen({ geo }: { geo: GeoState }) {
             dexEntry={dex[selectedCard.id]}
             onCapture={handleCapture}
             onClose={() => setSelectedId(null)}
+            onWalk={IS_DEMO && !demoRealGps && phase === 'playing' ? handleWalk : undefined}
+            walking={walking}
           />
         )}
 

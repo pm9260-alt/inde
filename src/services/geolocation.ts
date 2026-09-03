@@ -4,7 +4,7 @@
  * ・許可されない／取得できない場合もアプリを落とさず、状態として返す
  * ・開発ビルドでのみ、任意の座標に差し替えられる（本番では無効）
  */
-import { ENV } from '@/config/env'
+import { ENV, IS_DEMO } from '@/config/env'
 import type { LatLng } from '@/domain/geo'
 
 export type GeoStatus =
@@ -128,22 +128,37 @@ class GeolocationService {
     this.start()
   }
 
-  /* ---------------- 開発用のモック（本番ビルドでは動かない） --------------- */
+  /* -------- 現在地の差し替え（開発ビルドとデモ版でだけ動く） -------- */
+
+  /** 現在地を差し替えてよい状況かどうか */
+  private canSimulate(): boolean {
+    return ENV.isDev || IS_DEMO
+  }
 
   isMocked(): boolean {
     return this.mock !== null
   }
 
   setMockLocation(coords: LatLng, accuracy = 10): void {
-    if (!ENV.isDev) return
+    if (!this.canSimulate()) return
     this.stop()
     this.mock = { coords, accuracy }
     this.pushMockFix()
     this.startMockLoop()
   }
 
+  /**
+   * 差し替え中の現在地だけを更新する（デモの「歩く」で毎回呼ばれる）。
+   * 監視の再設定を伴わないので、細かく呼んでも負荷にならない。
+   */
+  moveMockLocation(coords: LatLng, accuracy?: number): void {
+    if (!this.canSimulate() || !this.mock) return
+    this.mock = { coords, accuracy: accuracy ?? this.mock.accuracy }
+    this.pushMockFix()
+  }
+
   clearMockLocation(): void {
-    if (!ENV.isDev) return
+    if (!this.canSimulate()) return
     this.mock = null
     this.stop()
     this.emit({ status: 'idle', fix: null })
